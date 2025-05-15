@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1094752044540",
+    "project_id": "mail-push-app-815d4",
+    "storage_bucket": "mail-push-app-815d4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1094752044540:android:13aad88d4ed7dee6e2de79",
+        "android_client_info": {
+          "package_name": "com.example.mail_push_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyArXZyBhGAhq3DoxFALJ0GDvccZM5kpGqQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
