@@ -20,6 +20,7 @@ dependencies:
   shared_preferences: ^2.5.3
   # HTTP 클라이언트 (API 통신)
   http: ^1.2.0
+  flutter_dotenv: ^5.2.1
 
 dev_dependencies:
   flutter_test:
@@ -30,6 +31,7 @@ flutter:
     - assets/sounds/siren.mp3
     - assets/icons/google_logo.png
     - assets/icons/outlook_logo.png
+    - assets/.env
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.

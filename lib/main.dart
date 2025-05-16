@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:mail_push_app/fcm/fcm_service.dart';
 import 'package:mail_push_app/api/api_client.dart';
@@ -60,6 +61,7 @@ void main() async {
     outlookAuthService,
     apiClient,
   );
+  await dotenv.load(fileName: "assets/.env");
 
   runApp(MyApp(
     fcmService: fcmService,

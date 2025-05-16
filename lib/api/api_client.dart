@@ -1,8 +1,9 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class ApiClient {
-  static const String _baseUrl = 'https://mail-push.xtect.net';
+  static final _baseUrl = dotenv.env['SERVER_BASE_URL']!;
 
   // 토큰 검증 기능은 서버에 /validate_token 엔드포인트가 없으므로 주석 처리
   Future<bool> validateToken(String accessToken, String service) async {

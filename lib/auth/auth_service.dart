@@ -4,6 +4,7 @@ import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// 인증 서비스 인터페이스
 typedef Tokens = Map<String,String?>;
@@ -21,16 +22,15 @@ class GmailAuthService implements AuthService {
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   Timer? _refreshTimer;
 
-  static const String _clientId =
-      '896564723347-ooift0gpd2idsgmllnoll75gjju646ai.apps.googleusercontent.com';
-  static const String _redirectUrl = 'com.secure.mailpushapp:/oauth2redirect';
+  static final String _clientId    = dotenv.env['GMAIL_CLIENT_ID']!;
+  static final String _redirectUrl = dotenv.env['GMAIL_REDIRECT_URI']!;
   static const List<String> _scopes = [
     'https://www.googleapis.com/auth/gmail.modify',
     'openid',
     'https://www.googleapis.com/auth/userinfo.email',
   ];
-  static const String _serverEndpoint =
-      'https://mail-push.xtect.net/api/update_tokens';
+  static final String _serverEndpoint =
+      '${dotenv.env['SERVER_BASE_URL']}/api/update_tokens';
 
   @override
   String get serviceName => 'gmail';
@@ -143,11 +143,11 @@ class OutlookAuthService implements AuthService {
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   Timer? _refreshTimer;
 
-  static const String _clientId = 'dcf1d4af-a8fc-4474-9857-5801f9ac766e';
-  static const String _redirectUrl = 'mailapp://oauth/';
+  static final String _clientId    = dotenv.env['OUTLOOK_CLIENT_ID']!;
+  static final String _redirectUrl = dotenv.env['OUTLOOK_REDIRECT_URI']!;
   static const List<String> _scopes = ['User.Read', 'Mail.Read', 'offline_access'];
-  static const String _serverEndpoint =
-      'https://mail-push.xtect.net/api/update_tokens';
+  static final String _serverEndpoint =
+      '${dotenv.env['SERVER_BASE_URL']}/api/update_tokens';
 
   @override
   String get serviceName => 'outlook';
