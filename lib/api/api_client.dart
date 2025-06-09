@@ -1,3 +1,4 @@
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -33,24 +34,30 @@ class ApiClient {
     required String? refreshToken,
     required String service,
   }) async {
+    // ↓ Outlook용 clientState를 가져옵니다 (예: secure storage 에 저장해둔 키)
+    String? clientState;
+    if (service == 'outlook') {
+      clientState = await FlutterSecureStorage().read(key: 'outlook_client_state');
+    }
+
     try {
+      final body = {
+        'fcm_token':    fcmToken,
+        'accessToken':  accessToken,
+        'refreshToken': refreshToken,
+        'service':      service,
+        // Outlook일 때만 client_state 필드 추가
+        if (service == 'outlook' && clientState != null)
+          'client_state': clientState,
+      };
+
       final response = await http.post(
         Uri.parse('$_baseUrl/api/update_tokens'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'fcm_token': fcmToken,
-          'accessToken': accessToken,
-          'refreshToken': refreshToken,
-          'service': service, // 'gmail' 또는 'outlook'
-        }),
+        body: json.encode(body),
       );
       print('토큰 등록 응답: ${response.statusCode} ${response.body}');
-      if (response.statusCode == 200) {
-        return true;
-      } else {
-        print('토큰 등록 실패: ${response.statusCode} ${response.body}');
-        return false;
-      }
+      return response.statusCode == 200;
     } catch (e) {
       print('토큰 등록 오류: $e');
       return false;

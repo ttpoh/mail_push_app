@@ -8,6 +8,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  uuid: ^4.5.0
   # 인증 관련 (Google Sign-In, OAuth 등)
   google_sign_in: ^6.1.0
   googleapis_auth: ^1.6.0        # Google APIs 인증 패키지

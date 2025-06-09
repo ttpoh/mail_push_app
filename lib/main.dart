@@ -7,6 +7,8 @@ import 'package:mail_push_app/screens/login_screen.dart';
 import 'package:mail_push_app/screens/home_screen.dart';
 import 'package:mail_push_app/screens/mail_detail_page.dart';
 import 'package:mail_push_app/auth/auth_service.dart';
+import 'package:mail_push_app/auth/gmail_auth.dart';
+import 'package:mail_push_app/auth/outlook_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mail_push_app/firebase_options.dart';
 import 'package:mail_push_app/utils/navigation_service.dart';

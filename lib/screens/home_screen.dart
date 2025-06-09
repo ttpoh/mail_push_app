@@ -6,6 +6,8 @@ import 'package:mail_push_app/models/email.dart';
 import 'package:mail_push_app/screens/login_screen.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:mail_push_app/auth/gmail_auth.dart';
+import 'package:mail_push_app/auth/outlook_auth.dart';
 
 class HomeScreen extends StatefulWidget {
   final AuthService authService;
