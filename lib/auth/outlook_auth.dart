@@ -66,6 +66,39 @@ class OutlookAuthService implements AuthService {
     });
   }
 
+  Future<void> listSubscriptions() async {
+    final accessToken = await _storage.read(key: 'outlook_access_token');
+    if (accessToken == null) {
+      print('No access token found. Please sign in first.');
+      return;
+    }
+
+    final url = Uri.parse('https://graph.microsoft.com/v1.0/subscriptions');
+
+    try {
+      final response = await http.get(
+        url,
+        headers: {
+          'Authorization': 'Bearer $accessToken',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final List<dynamic> subscriptions = data['value'] ?? [];
+        print('🔍 Current Subscriptions (${subscriptions.length}):');
+        for (var sub in subscriptions) {
+          print('ID: ${sub['id']}, Resource: ${sub['resource']}, Expiration: ${sub['expirationDateTime']}');
+        }
+      } else {
+        print('Failed to list subscriptions: ${response.statusCode} ${response.body}');
+      }
+    } catch (e) {
+      print('Error listing subscriptions: $e');
+    }
+  }
+
+
   Future<void> _createSubscription(String accessToken, String fcmToken, String clientState) async {
     const maxRetries = 3;
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
@@ -134,10 +167,12 @@ class OutlookAuthService implements AuthService {
     if (at == null || rt == null) {
       throw Exception('Failed to obtain tokens');
     }
-
+    final email = await getOutlookEmail(at);
+    print('User email: $email'); // 디버깅용 로그
     // 토큰 저장
     await _storage.write(key: 'outlook_access_token', value: at);
     await _storage.write(key: 'outlook_refresh_token', value: rt);
+    await _storage.write(key: 'outlook_user_email', value: email);
 
     // FCM 토큰 획득 및 저장
     final fcmToken = await FirebaseMessaging.instance.getToken();
@@ -155,12 +190,13 @@ class OutlookAuthService implements AuthService {
     );
     if (!success) {
       throw Exception('Failed to register tokens with server');
-    }
+    }  
 
     // 서브스크립션 생성 호출
     await Future.delayed(Duration(milliseconds: 300)); // optional delay
     print('Calling _createSubscription for fcm_token: $fcmToken, client_state: $clientState');
     await _createSubscription(at, fcmToken, clientState);
+    await listSubscriptions(); // [Optional] 구독 현황 보기
 
     // 자동 리프레시 타이머
     final DateTime? expiry = result?.accessTokenExpirationDateTime;
@@ -177,6 +213,26 @@ class OutlookAuthService implements AuthService {
     return {'accessToken': at, 'refreshToken': rt};
   }
 
+    /// Outlook accessToken을 사용해 로그인된 사용자 이메일 주소를 반환
+  Future<String?> getOutlookEmail(String accessToken) async {
+    final url = Uri.parse('https://graph.microsoft.com/v1.0/me');
+
+    final response = await http.get(
+      url,
+      headers: {
+        'Authorization': 'Bearer $accessToken',
+      },
+    );
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      // 'mail' 또는 'userPrincipalName' 중 하나 사용
+      return data['mail'] ?? data['userPrincipalName'];
+    } else {
+      print('❌ Failed to get Outlook email: ${response.statusCode}');
+      return null;
+    }
+  }
   @override
   Future<Tokens> refreshTokens() async {
     print('refreshTokens called at ${DateTime.now()}');
@@ -241,11 +297,35 @@ class OutlookAuthService implements AuthService {
   @override
   Future<void> signOut() async {
     _refreshTimer?.cancel();
+
+    final clientState = await _storage.read(key: 'outlook_client_state');
+    if (clientState != null) {
+      final logoutUrl = Uri.parse('${dotenv.env['SERVER_BASE_URL']}/api/outlook/logout');
+      try {
+        final response = await http.post(
+          logoutUrl,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'client_state': clientState}),
+        );
+
+        if (response.statusCode == 200) {
+          print('✅ Successfully logged out from server for clientState: $clientState');
+        } else {
+          print('⚠️ Server logout failed: ${response.statusCode} ${response.body}');
+        }
+      } catch (e) {
+        print('❌ Error calling server logout: $e');
+      }
+    }
+
+    // 로컬 토큰 삭제
     await _storage.delete(key: 'outlook_access_token');
     await _storage.delete(key: 'outlook_refresh_token');
     await _storage.delete(key: 'outlook_client_state');
-    await _storage.delete(key: 'fcm_token'); // FCM 토큰 삭제
+    await _storage.delete(key: 'fcm_token');
+    print('📦 Local storage cleaned up after logout');
   }
+
 
   @override
   Future<String?> getCurrentUserEmail() async {

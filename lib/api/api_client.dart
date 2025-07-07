@@ -2,6 +2,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:mail_push_app/models/email.dart';
 
 class ApiClient {
   static final _baseUrl = dotenv.env['SERVER_BASE_URL']!;
@@ -33,22 +34,35 @@ class ApiClient {
     required String accessToken,
     required String? refreshToken,
     required String service,
+    String? emailAddress, // Gmail용 이메일 주소 추가
   }) async {
-    // ↓ Outlook용 clientState를 가져옵니다 (예: secure storage 에 저장해둔 키)
+    // Outlook용 clientState를 가져옵니다
     String? clientState;
     if (service == 'outlook') {
       clientState = await FlutterSecureStorage().read(key: 'outlook_client_state');
     }
 
+    // Gmail일 경우 저장된 이메일 주소를 가져오거나 파라미터 사용
+    String? email;
+    if (service == 'gmail') {
+      email = emailAddress ?? await FlutterSecureStorage().read(key: 'gmail_user_email');
+      if (email == null) {
+        print('Gmail 이메일 주소 누락');
+        return false;
+      }
+    }
+
     try {
       final body = {
-        'fcm_token':    fcmToken,
-        'accessToken':  accessToken,
+        'fcm_token': fcmToken,
+        'accessToken': accessToken,
         'refreshToken': refreshToken,
-        'service':      service,
-        // Outlook일 때만 client_state 필드 추가
-        if (service == 'outlook' && clientState != null)
-          'client_state': clientState,
+        'service': service,
+        'email_address': email,
+        // Gmail일 경우 email_address 추가
+        if (service == 'gmail' && email != null) 'email_address': email,
+        // Outlook일 경우 client_state 추가
+        if (service == 'outlook' && clientState != null) 'client_state': clientState,
       };
 
       final response = await http.post(
@@ -61,6 +75,25 @@ class ApiClient {
     } catch (e) {
       print('토큰 등록 오류: $e');
       return false;
+    }
+  }
+
+
+  Future<List<Email>> fetchEmails(String service, String emailAddress) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/api/emails?service=$service&email_address=${Uri.encodeComponent(emailAddress)}');
+      print('🔔 Requesting: $uri');
+      final response = await http.get(uri);
+      print('🔔 Email load 응답: ${response.statusCode} ${response.body}');
+      if (response.statusCode == 200) {
+        final List<dynamic> jsonList = jsonDecode(response.body);
+        return jsonList.map((json) => Email.fromJson(json as Map<String, dynamic>)).toList();
+      } else {
+        throw Exception('Failed to load emails: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ fetchEmails 오류: $e');
+      rethrow;
     }
   }
 }

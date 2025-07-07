@@ -10,12 +10,16 @@ import AVFoundation
     var flutterViewController: FlutterViewController?
     let synthesizer = AVSpeechSynthesizer()
     var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    var isTTSSpeaking = false
+    var processedMessageIds = Set<String>()
+    private var mailEventChannel: FlutterEventChannel?
+    private var eventSink: FlutterEventSink?
 
     override func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        // FlutterViewController 참조
+        // FlutterViewController 설정
         if let nav = window?.rootViewController as? UINavigationController,
            let flutterVC = nav.children.first as? FlutterViewController {
             flutterViewController = flutterVC
@@ -35,6 +39,7 @@ import AVFoundation
             print("Firebase 초기화 실패: \(error)")
         }
 
+        // 알림 설정
         UNUserNotificationCenter.current().delegate = self
         Messaging.messaging().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(
@@ -44,7 +49,7 @@ import AVFoundation
         }
         application.registerForRemoteNotifications()
 
-        // MethodChannels 등록
+        // MethodChannel 설정
         let criticalChannel = FlutterMethodChannel(
             name: "com.secure.mail_push_app/critical_alerts",
             binaryMessenger: flutterViewController!.binaryMessenger
@@ -76,11 +81,18 @@ import AVFoundation
             }
         }
 
+        // EventChannel 설정
+        mailEventChannel = FlutterEventChannel(
+            name: "com.secure.mail_push_app/mail_events",
+            binaryMessenger: flutterViewController!.binaryMessenger
+        )
+        mailEventChannel?.setStreamHandler(StreamHandler(delegate: self))
+
         GeneratedPluginRegistrant.register(with: self)
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 
-        override func application(
+    override func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
@@ -88,29 +100,38 @@ import AVFoundation
         super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
     }
 
-    // MARK: - FCM 토큰 갱신 콜백
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         guard let token = fcmToken else { return }
         print("🔔 FCM registration token: \(token)")
-        // 서버에 토큰 등록 로직 호출 필요 시 여기에 추가
     }
 
-    // 백그라운드 silent push 수신
     override func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
         print("🔔 백그라운드 푸시: \(userInfo)")
+        guard let messageId = userInfo["gcm.message_id"] as? String,
+              !processedMessageIds.contains(messageId) else {
+            print("🔔 이미 처리된 백그라운드 메시지: \(userInfo["gcm.message_id"] ?? "")")
+            completionHandler(.noData)
+            return
+        }
 
-        // Background Task 시작
+        guard application.applicationState != .active else {
+            print("🔔 포그라운드 상태: 백그라운드 푸시 처리 생략")
+            completionHandler(.noData)
+            return
+        }
+
+        processedMessageIds.insert(messageId)
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "TTS") {
             UIApplication.shared.endBackgroundTask(self.backgroundTask)
             self.backgroundTask = .invalid
         }
 
-        // mailData 파싱 및 TTS 텍스트 선택
         var ttsText: String?
+        var mailDataToSend: [String: Any]?
         if let mailDataString = userInfo["mailData"] as? String {
             do {
                 if let mailData = try JSONSerialization.jsonObject(with: mailDataString.data(using: .utf8)!) as? [String: String] {
@@ -121,57 +142,108 @@ import AVFoundation
                     } else if subject.contains("미팅") || body.contains("미팅") {
                         ttsText = "ミーティングのメールが届きました"
                     }
+                    mailDataToSend = ["messageId": messageId, "subject": subject, "body": body]
                 }
             } catch {
                 print("🔔 mailData JSON 파싱 실패: \(error)")
             }
-        } else {
-            print("🔔 mailData가 문자열 형식이 아님")
         }
 
-        if let text = ttsText {
+        // Flutter로 이벤트 전송
+        if let data = mailDataToSend, let sink = eventSink {
+            sink(data)
+        }
+
+        if let text = ttsText, !isTTSSpeaking {
             DispatchQueue.main.async {
                 self.speak(text)
             }
         } else {
-            print("🔔 TTS 메시지 없음")
+            print("🔔 TTS 메시지 없음 또는 이미 TTS 실행 중")
         }
 
         completionHandler(.newData)
     }
 
-    // 공통 TTS 호출
+    override func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        print("🔔 포그라운드 알림 수신: \(notification.request.identifier)")
+        guard let userInfo = notification.request.content.userInfo as? [String: Any],
+              let messageId = userInfo["gcm.message_id"] as? String,
+              !processedMessageIds.contains(messageId) else {
+            print("🔔 이미 처리된 포그라운드 메시지: \(notification.request.identifier)")
+            completionHandler([.alert, .sound, .badge])
+            return
+        }
+
+        processedMessageIds.insert(messageId)
+        var ttsText: String?
+        var mailDataToSend: [String: Any]?
+        if let mailDataString = userInfo["mailData"] as? String {
+            do {
+                if let mailData = try JSONSerialization.jsonObject(with: mailDataString.data(using: .utf8)!) as? [String: String] {
+                    let subject = mailData["subject"] ?? ""
+                    let body = mailData["body"] ?? ""
+                    if subject.contains("긴급") || body.contains("긴급") {
+                        ttsText = "緊急メールが届きました"
+                    } else if subject.contains("미팅") || body.contains("미팅") {
+                        ttsText = "ミーティングのメール가届きました"
+                    }
+                    mailDataToSend = ["messageId": messageId, "subject": subject, "body": body]
+                }
+            } catch {
+                print("🔔 포그라운드 mailData JSON 파싱 실패: \(error)")
+            }
+        }
+
+        // Flutter로 이벤트 전송
+        if let data = mailDataToSend, let sink = eventSink {
+            sink(data)
+        }
+
+        if let text = ttsText, !isTTSSpeaking {
+            DispatchQueue.main.async {
+                self.speak(text)
+            }
+        } else {
+            print("🔔 포그라운드 TTS 메시지 없음 또는 이미 TTS 실행 중")
+        }
+
+        completionHandler([.alert, .sound, .badge])
+    }
+
     private func speak(_ text: String) {
+        guard !isTTSSpeaking else {
+            print("🔔 TTS 이미 실행 중, 중복 호출 방지")
+            return
+        }
+        isTTSSpeaking = true
+
         let session = AVAudioSession.sharedInstance()
         do {
-            if #available(iOS 13.0, *) {
-                try session.setCategory(.playback,
-                                        mode: .spokenAudio,
-                                        options: [.mixWithOthers])
-            } else {
-                try session.setCategory(.playback,
-                                        options: [.mixWithOthers])
-            }
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try session.setActive(true)
             print("🔔 AVAudioSession 활성화 성공")
         } catch {
             print("🔔 AVAudioSession 설정 실패: \(error)")
+            isTTSSpeaking = false
+            return
         }
 
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: "ja-JP")
-        utterance.preUtteranceDelay = 1.5
+        utterance.preUtteranceDelay = 0.5
         synthesizer.speak(utterance)
         print("🔔 TTS 시작: \(text)")
     }
 
-    // MARK: AVSpeechSynthesizerDelegate
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                          didFinish utterance: AVSpeechUtterance) {
-        // 오디오 세션 비활성화 & Background Task 종료
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        isTTSSpeaking = false
         do {
-            try AVAudioSession.sharedInstance().setActive(false,
-                options: .notifyOthersOnDeactivation)
+            try AVAudioSession.sharedInstance().setActive(false)
             print("🔔 AVAudioSession 비활성화 성공")
         } catch {
             print("🔔 AVAudioSession 비활성화 실패: \(error)")
@@ -182,12 +254,31 @@ import AVFoundation
         }
     }
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                          didStart utterance: AVSpeechUtterance) {
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
         print("🔔 TTS 음성 재생 시작")
     }
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
-                          didCancel utterance: AVSpeechUtterance) {
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         print("🔔 TTS 음성 재생 취소")
+        isTTSSpeaking = false
+    }
+
+    // StreamHandler 클래스
+    class StreamHandler: NSObject, FlutterStreamHandler {
+        weak var delegate: AppDelegate?
+
+        init(delegate: AppDelegate) {
+            self.delegate = delegate
+        }
+
+        func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+            delegate?.eventSink = events
+            return nil
+        }
+
+        func onCancel(withArguments arguments: Any?) -> FlutterError? {
+            delegate?.eventSink = nil
+            return nil
+        }
     }
 }

@@ -8,12 +8,11 @@ import 'package:mail_push_app/screens/home_screen.dart';
 import 'package:mail_push_app/auth/gmail_auth.dart';
 import 'package:mail_push_app/auth/outlook_auth.dart';
 
-class LoginScreen extends StatelessWidget {
+class LoginScreen extends StatefulWidget {
   final FcmService fcmService;
   final ApiClient apiClient;
   final GmailAuthService gmailAuthService;
   final OutlookAuthService outlookAuthService;
-  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
   const LoginScreen({
     Key? key,
@@ -23,7 +22,16 @@ class LoginScreen extends StatelessWidget {
     required this.outlookAuthService,
   }) : super(key: key);
 
+  @override
+  State<LoginScreen> createState() => _LoginScreenState();
+}
+
+class _LoginScreenState extends State<LoginScreen> {
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  bool _isLoading = false;
+
   Future<void> _signIn(BuildContext context, AuthService authService) async {
+    setState(() => _isLoading = true);
     try {
       final tokens = await authService.signIn();
       final accessToken = tokens['accessToken'];
@@ -32,47 +40,47 @@ class LoginScreen extends StatelessWidget {
       if (accessToken != null) {
         final fcmToken = await _secureStorage.read(key: 'fcm_token') ?? await FirebaseMessaging.instance.getToken();
         if (fcmToken != null) {
-          // FCM 토큰 저장
           await _secureStorage.write(key: 'fcm_token', value: fcmToken);
-          
-          // 토큰 등록
-          final success = await apiClient.registerTokens(
+
+          final success = await widget.apiClient.registerTokens(
             fcmToken: fcmToken,
             accessToken: accessToken,
             refreshToken: refreshToken,
             service: authService.serviceName,
           );
-          
+
           if (success) {
+            if (!mounted) return;
             Navigator.pushReplacement(
               context,
               MaterialPageRoute(
                 builder: (context) => HomeScreen(
                   authService: authService,
-                  fcmService: fcmService,
-                  apiClient: apiClient,
+                  fcmService: widget.fcmService,
+                  apiClient: widget.apiClient,
                 ),
               ),
             );
+            return;
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('${authService.serviceName} 토큰 등록 실패')),
-            );
+            _showSnackBar('${authService.serviceName} 토큰 등록 실패');
           }
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('FCM 토큰 획득 실패')),
-          );
+          _showSnackBar('FCM 토큰 획득 실패');
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${authService.serviceName} 로그인 실패')),
-        );
+        _showSnackBar('${authService.serviceName} 로그인 실패');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('로그인 오류: $e')),
-      );
+      _showSnackBar('로그인 오류: $e');
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -81,20 +89,22 @@ class LoginScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('로그인')),
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            ElevatedButton(
-              onPressed: () => _signIn(context, gmailAuthService),
-              child: const Text('Gmail로 로그인'),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => _signIn(context, outlookAuthService),
-              child: const Text('Outlook으로 로그인'),
-            ),
-          ],
-        ),
+        child: _isLoading
+            ? const CircularProgressIndicator()
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ElevatedButton(
+                    onPressed: () => _signIn(context, widget.gmailAuthService),
+                    child: const Text('Gmail로 로그인'),
+                  ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () => _signIn(context, widget.outlookAuthService),
+                    child: const Text('Outlook으로 로그인'),
+                  ),
+                ],
+              ),
       ),
     );
   }

@@ -6,4 +6,5 @@ abstract class AuthService {
   Future<Tokens> refreshTokens();
   String get serviceName;
   Future<String?> getCurrentUserEmail();
+  Future<String>_getEmailAddress();
 }

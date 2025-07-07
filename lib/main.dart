@@ -34,6 +34,7 @@ class CriticalAlertService {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await dotenv.load(fileName: "assets/.env");
   // Firebase 초기화
   try {
     await Firebase.initializeApp(
@@ -63,7 +64,6 @@ void main() async {
     outlookAuthService,
     apiClient,
   );
-  await dotenv.load(fileName: "assets/.env");
 
   runApp(MyApp(
     fcmService: fcmService,
