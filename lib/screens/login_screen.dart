@@ -5,12 +5,14 @@ import 'package:mail_push_app/fcm/fcm_service.dart';
 import 'package:mail_push_app/api/api_client.dart';
 import 'package:mail_push_app/auth/auth_service.dart';
 import 'package:mail_push_app/screens/home_screen.dart';
+import 'package:mail_push_app/auth/icloud_auth.dart';
 import 'package:mail_push_app/auth/gmail_auth.dart';
 import 'package:mail_push_app/auth/outlook_auth.dart';
 
 class LoginScreen extends StatefulWidget {
   final FcmService fcmService;
   final ApiClient apiClient;
+  final ICloudAuthService iCloudAuthService;
   final GmailAuthService gmailAuthService;
   final OutlookAuthService outlookAuthService;
 
@@ -18,6 +20,7 @@ class LoginScreen extends StatefulWidget {
     Key? key,
     required this.fcmService,
     required this.apiClient,
+    required this.iCloudAuthService,
     required this.gmailAuthService,
     required this.outlookAuthService,
   }) : super(key: key);
@@ -94,6 +97,10 @@ class _LoginScreenState extends State<LoginScreen> {
             : Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  ElevatedButton(
+                    onPressed: () => _signIn(context, widget.iCloudAuthService),
+                    child: const Text('iCloud로 로그인'),
+                  ),
                   ElevatedButton(
                     onPressed: () => _signIn(context, widget.gmailAuthService),
                     child: const Text('Gmail로 로그인'),

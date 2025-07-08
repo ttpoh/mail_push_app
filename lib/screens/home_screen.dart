@@ -8,6 +8,7 @@ import 'package:mail_push_app/models/email.dart';
 import 'package:mail_push_app/screens/login_screen.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:mail_push_app/auth/icloud_auth.dart';
 import 'package:mail_push_app/auth/gmail_auth.dart';
 import 'package:mail_push_app/auth/outlook_auth.dart';
 import 'package:intl/intl.dart';
@@ -178,6 +179,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           builder: (_) => LoginScreen(
             fcmService: widget.fcmService,
             apiClient: widget.apiClient,
+            iCloudAuthService: ICloudAuthService(),
             gmailAuthService: GmailAuthService(),
             outlookAuthService: OutlookAuthService(),
           ),
@@ -198,7 +200,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         title: Text(_userEmail != null
             ? '계정: $_userEmail'
-            : '${widget.authService.serviceName} 푸시 데모'),
+            : '${widget.authService.serviceName}'),
         actions: [
           PopupMenuButton<String>(
             icon: const Icon(Icons.menu),

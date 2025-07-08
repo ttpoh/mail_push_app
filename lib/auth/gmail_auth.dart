@@ -224,7 +224,6 @@ class GmailAuthService implements AuthService {
     }
 
     final logoutUrl = '${dotenv.env['SERVER_BASE_URL']}/api/logout_gmail';
-    // final unsubscribeUrl = '${dotenv.env['SERVER_BASE_URL']}/api/delete_gmail_subscription';
 
     try {
       // 1. 서버에 로그아웃 요청 (FCM 토큰 삭제 등)
@@ -238,19 +237,7 @@ class GmailAuthService implements AuthService {
         print('✅ Gmail logout request successful');
       } else {
         print('❌ Gmail logout failed: ${logoutResponse.statusCode} ${logoutResponse.body}');
-      }
-
-      // // 2. Gmail 구독 삭제 요청
-      // final unsubscribeResponse = await http.post(
-      //   Uri.parse(unsubscribeUrl),
-      //   headers: {'Content-Type': 'application/json'},
-      // );
-
-      // if (unsubscribeResponse.statusCode == 200) {
-      //   print('✅ Gmail subscription deleted successfully');
-      // } else {
-      //   print('❌ Gmail subscription delete failed: ${unsubscribeResponse.statusCode} ${unsubscribeResponse.body}');
-      // }
+      }   
 
     } catch (e) {
       print('❌ Error during logout or unsubscribe: $e');

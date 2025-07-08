@@ -36,18 +36,30 @@ class ApiClient {
     required String service,
     String? emailAddress, // Gmail용 이메일 주소 추가
   }) async {
-    // Outlook용 clientState를 가져옵니다
+    final storage = FlutterSecureStorage();
+
+    // Outlook용 clientState
     String? clientState;
     if (service == 'outlook') {
-      clientState = await FlutterSecureStorage().read(key: 'outlook_client_state');
+      clientState = await storage.read(key: 'outlook_client_state');
     }
 
-    // Gmail일 경우 저장된 이메일 주소를 가져오거나 파라미터 사용
+    // Gmail 이메일 주소
     String? email;
     if (service == 'gmail') {
-      email = emailAddress ?? await FlutterSecureStorage().read(key: 'gmail_user_email');
+      email = emailAddress ?? await storage.read(key: 'gmail_user_email');
       if (email == null) {
         print('Gmail 이메일 주소 누락');
+        return false;
+      }
+    }
+
+    // iCloud용 sub (기준 식별자)
+    String? sub;
+    if (service == 'icloud') {
+      sub = await storage.read(key: 'icloud_sub');
+      if (sub == null) {
+        print('❌ iCloud sub 누락');
         return false;
       }
     }
@@ -58,11 +70,9 @@ class ApiClient {
         'accessToken': accessToken,
         'refreshToken': refreshToken,
         'service': service,
-        'email_address': email,
-        // Gmail일 경우 email_address 추가
         if (service == 'gmail' && email != null) 'email_address': email,
-        // Outlook일 경우 client_state 추가
         if (service == 'outlook' && clientState != null) 'client_state': clientState,
+        if (service == 'icloud' && sub != null) 'sub': sub,
       };
 
       final response = await http.post(
@@ -70,6 +80,7 @@ class ApiClient {
         headers: {'Content-Type': 'application/json'},
         body: json.encode(body),
       );
+
       print('토큰 등록 응답: ${response.statusCode} ${response.body}');
       return response.statusCode == 200;
     } catch (e) {

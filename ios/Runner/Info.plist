@@ -24,13 +24,23 @@
 		<string>????</string>
 		<key>CFBundleURLTypes</key>
 		<array>
-			<dict>
-				<key>CFBundleURLSchemes</key>
-				<array>
-					<string>com.googleusercontent.apps.896564723347-ooift0gpd2idsgmllnoll75gjju646ai</string>
-				</array>
-			</dict>
+		<!-- Google Sign-In용 -->
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+			<string>com.googleusercontent.apps.896564723347-ooift0gpd2idsgmllnoll75gjju646ai</string>
+			</array>
+		</dict>
+
+		<!-- Apple Sign-In용 (일반적으로는 생략 가능하지만, 원할 경우 추가 가능) -->
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+			<string>com.secure.mailPushApp</string> <!-- 실제 앱의 Bundle ID -->
+			</array>
+		</dict>
 		</array>
+
 		<key>CFBundleVersion</key>
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
 		<key>FirebaseAppDelegateProxyEnabled</key>

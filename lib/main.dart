@@ -7,6 +7,7 @@ import 'package:mail_push_app/screens/login_screen.dart';
 import 'package:mail_push_app/screens/home_screen.dart';
 import 'package:mail_push_app/screens/mail_detail_page.dart';
 import 'package:mail_push_app/auth/auth_service.dart';
+import 'package:mail_push_app/auth/icloud_auth.dart';
 import 'package:mail_push_app/auth/gmail_auth.dart';
 import 'package:mail_push_app/auth/outlook_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -55,11 +56,13 @@ void main() async {
   await fcmService.initialize();
 
   final apiClient = ApiClient();
+  final iCloudAuthService = ICloudAuthService();
   final gmailAuthService = GmailAuthService();
   final outlookAuthService = OutlookAuthService();
 
   // 자동 로그인 확인
   final loginResult = await _checkAutoLogin(
+    iCloudAuthService,
     gmailAuthService,
     outlookAuthService,
     apiClient,
@@ -68,6 +71,7 @@ void main() async {
   runApp(MyApp(
     fcmService: fcmService,
     apiClient: apiClient,
+    iCloudAuthService: iCloudAuthService,
     gmailAuthService: gmailAuthService,
     outlookAuthService: outlookAuthService,
     isLoggedIn: loginResult.isLoggedIn,
@@ -76,15 +80,23 @@ void main() async {
 }
 
 Future<LoginResult> _checkAutoLogin(
+  ICloudAuthService iCloudAuthService,
   GmailAuthService gmailAuthService,
   OutlookAuthService outlookAuthService,
   ApiClient apiClient,
 ) async {
   const storage = FlutterSecureStorage();
+  final iCloudAccessToken = await storage.read(key: 'icloud_access_token');
   final gmailAccessToken = await storage.read(key: 'gmail_access_token');
   final outlookAccessToken = await storage.read(key: 'outlook_access_token');
-
-  if (gmailAccessToken != null) {
+  if (iCloudAccessToken != null) {
+    final isValid = await apiClient.validateToken(iCloudAccessToken, 'icloud');
+    if (isValid) {
+      return LoginResult(isLoggedIn: true, authService: iCloudAuthService);
+    } else {
+      await iCloudAuthService.signOut();
+    }
+  } else if (gmailAccessToken != null) {
     final isValid = await apiClient.validateToken(gmailAccessToken, 'gmail');
     if (isValid) {
       return LoginResult(isLoggedIn: true, authService: gmailAuthService);
@@ -112,6 +124,7 @@ class LoginResult {
 class MyApp extends StatelessWidget {
   final FcmService fcmService;
   final ApiClient apiClient;
+  final ICloudAuthService iCloudAuthService;
   final GmailAuthService gmailAuthService;
   final OutlookAuthService outlookAuthService;
   final bool isLoggedIn;
@@ -121,6 +134,7 @@ class MyApp extends StatelessWidget {
     Key? key,
     required this.fcmService,
     required this.apiClient,
+    required this.iCloudAuthService,
     required this.gmailAuthService,
     required this.outlookAuthService,
     required this.isLoggedIn,
@@ -143,6 +157,7 @@ class MyApp extends StatelessWidget {
         '/login': (context) => LoginScreen(
               fcmService: fcmService,
               apiClient: apiClient,
+              iCloudAuthService: iCloudAuthService,
               gmailAuthService: gmailAuthService,
               outlookAuthService: outlookAuthService,
             ),

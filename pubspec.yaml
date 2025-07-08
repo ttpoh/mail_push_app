@@ -19,6 +19,8 @@ dependencies:
   flutter_secure_storage: ^9.2.4
   flutter_tts: ^3.6.3
   shared_preferences: ^2.5.3
+  sign_in_with_apple: ^5.0.0
+
   # HTTP 클라이언트 (API 통신)
   http: ^1.2.0
   flutter_dotenv: ^5.2.1
@@ -42,7 +44,7 @@ flutter_native_splash:
   ios: true
   android_gravity: center
   ios_content_mode: scaleAspectFit
-  
+
 flutter:
   assets:
     - assets/sounds/siren.mp3
