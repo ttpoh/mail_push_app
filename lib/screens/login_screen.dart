@@ -99,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   ElevatedButton(
                     onPressed: () => _signIn(context, widget.iCloudAuthService),
-                    child: const Text('iCloud로 로그인'),
+                    child: const Text('Apple로 로그인'),
                   ),
                   ElevatedButton(
                     onPressed: () => _signIn(context, widget.gmailAuthService),

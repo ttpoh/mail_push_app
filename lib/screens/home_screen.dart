@@ -145,6 +145,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _handleMailEvent(dynamic event) {
     if (event is Map<dynamic, dynamic>) {
       final mailData = Map<String, dynamic>.from(event);
+      debugPrint('mailData in _handleMailEvent: $mailData');
       final email = Email(
         id: int.tryParse(mailData['messageId']?.toString() ?? '') ?? 0, // String을 int로 변환
         emailAddress: _userEmail ?? '',
