@@ -39,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // EventChannel 추가
   static const EventChannel _mailEventChannel = EventChannel('com.secure.mail_push_app/mail_events');
 
+  bool get _isICloud => widget.authService.serviceName.toLowerCase() == 'icloud';
+
   @override
   void initState() {
     super.initState();
@@ -57,14 +59,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     widget.fcmService.setOnNewEmailCallback(_onNewEmail);
     await _loadUserEmail();
     await _checkInitialMessage();
-    await _fetchAndSetEmails();
+    if (!_isICloud) {
+      await _fetchAndSetEmails();
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     debugPrint('📌 AppLifecycleState: $state');
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.resumed && !_isICloud) {
       _fetchAndSetEmails();
     }
   }

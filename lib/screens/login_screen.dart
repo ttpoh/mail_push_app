@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mail_push_app/fcm/fcm_service.dart';
 import 'package:mail_push_app/api/api_client.dart';
@@ -87,7 +88,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  @override
+ @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('로그인')),
@@ -97,18 +98,41 @@ class _LoginScreenState extends State<LoginScreen> {
             : Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  ElevatedButton(
+                  // Apple 로그인
+                  SignInWithAppleButton(
                     onPressed: () => _signIn(context, widget.iCloudAuthService),
-                    child: const Text('Apple로 로그인'),
-                  ),
-                  ElevatedButton(
-                    onPressed: () => _signIn(context, widget.gmailAuthService),
-                    child: const Text('Gmail로 로그인'),
+                    borderRadius: BorderRadius.circular(8),
+                    style: SignInWithAppleButtonStyle.black,
                   ),
                   const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () => _signIn(context, widget.outlookAuthService),
-                    child: const Text('Outlook으로 로그인'),
+
+                  // Gmail 로그인
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => _signIn(context, widget.gmailAuthService),
+                      child: const Text('Gmail로 로그인'),
+                      style: ElevatedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Outlook 로그인
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => _signIn(context, widget.outlookAuthService),
+                      child: const Text('Outlook으로 로그인'),
+                      style: ElevatedButton.styleFrom(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
                   ),
                 ],
               ),

@@ -59,9 +59,9 @@ class ICloudAuthService extends AuthService {
         );
 
         if (success) {
-          debugPrint('✅ iCloud 토큰 등록 성공');
+          debugPrint('✅ apple 토큰 등록 성공');
         } else {
-          debugPrint('❌ iCloud 토큰 등록 실패');
+          debugPrint('❌ apple 토큰 등록 실패');
         }
       }
 
