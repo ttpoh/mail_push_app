@@ -63,83 +63,94 @@ class GmailAuthService implements AuthService {
 
   @override
   Future<Tokens> signIn() async {
-    final result = await _appAuth.authorizeAndExchangeCode(
-      AuthorizationTokenRequest(
-        _clientId,
-        _redirectUrl,
-        serviceConfiguration: const AuthorizationServiceConfiguration(
-          authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-          tokenEndpoint: 'https://oauth2.googleapis.com/token',
+    try {
+      // 인증 및 토큰 교환 요청 (PKCE 자동 처리)
+      final authResult = await _appAuth.authorizeAndExchangeCode(
+        AuthorizationTokenRequest(
+          _clientId,
+          _redirectUrl,
+          serviceConfiguration: const AuthorizationServiceConfiguration(
+            authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+            tokenEndpoint: 'https://oauth2.googleapis.com/token',
+          ),
+          scopes: _scopes,
+          additionalParameters: {'access_type': 'offline', 'prompt': 'consent'},
         ),
-        scopes: _scopes,
-        additionalParameters: {'access_type': 'offline', 'prompt': 'consent'},
-      ),
-        );
-
-    final at = result?.accessToken;
-    final rt = result?.refreshToken;
-    if (at == null || rt == null) {
-        throw Exception('Failed to obtain tokens');
-    }
-
-    // Gmail API 호출하여 이메일 주소 가져오기
-    final email = await _getEmailAddress(at);
-    print('User email: $email'); // 디버깅용 로그
-
-    // 토큰과 이메일 주소 저장
-    await _storage.write(key: 'gmail_access_token', value: at);
-    await _storage.write(key: 'gmail_refresh_token', value: rt);
-    await _storage.write(key: 'gmail_user_email', value: email);
-
-    // 서버에 토큰 및 이메일 주소 전송
-    final fcmToken = await FirebaseMessaging.instance.getToken();
-    final response = await http.post(
-      Uri.parse(_serverEndpoint),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'service': serviceName,
-        'accessToken': at,
-        'refreshToken': rt,
-        'fcm_token': fcmToken,
-        'email_address': email, // 이메일 주소 추가
-      }),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception('Failed to update tokens on server: ${response.body}');
-    }
-
-    // 자동 리프레시 타이머 설정
-    final expiry = result?.accessTokenExpirationDateTime;
-    if (expiry != null) {
-      final delay = expiry.difference(DateTime.now()) - const Duration(minutes: 5);
-      _refreshTimer?.cancel();
-      _refreshTimer = Timer(
-        delay.isNegative ? Duration.zero : delay,
-        refreshTokens,
       );
+
+      final accessToken = authResult?.accessToken;
+      final refreshToken = authResult?.refreshToken;
+
+      if (accessToken == null || refreshToken == null) {
+        throw Exception('Failed to obtain tokens');
+      }
+
+      // Gmail API 호출하여 이메일 주소 가져오기
+      final email = await _getEmailAddress(accessToken);
+      print('User email: $email');
+
+      // 토큰과 이메일 주소 저장
+      await _storage.write(key: 'gmail_access_token', value: accessToken);
+      await _storage.write(key: 'gmail_refresh_token', value: refreshToken);
+      await _storage.write(key: 'gmail_user_email', value: email);
+
+      // 서버에 토큰 및 이메일 주소 전송
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      final response = await http.post(
+        Uri.parse(_serverEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'service': serviceName,
+          'accessToken': accessToken,
+          'refreshToken': refreshToken,
+          'fcm_token': fcmToken,
+          'email_address': email,
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to update tokens on server: ${response.body}');
+      }
+
+      // Gmail Pub/Sub 구독 생성
+      final subResp = await http.post(
+        Uri.parse(_createSubscriptionEndpoint),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'fcm_token': fcmToken,
+          'access_token': accessToken,
+          'refresh_token': refreshToken,
+          'email_address': email,
+        }),
+      );
+
+      if (subResp.statusCode == 200) {
+        print('✅ Gmail Pub/Sub subscription created');
+      } else {
+        print('⚠️ Failed to create Gmail subscription: ${subResp.body}');
+      }
+
+      // 자동 리프레시 타이머 설정
+      final expiry = authResult?.accessTokenExpirationDateTime;
+      if (expiry != null) {
+        final delay = expiry.difference(DateTime.now()) - const Duration(minutes: 5);
+        _refreshTimer?.cancel();
+        _refreshTimer = Timer(
+          delay.isNegative ? Duration.zero : delay,
+          refreshTokens,
+        );
+      }
+
+      return {
+        'accessToken': accessToken,
+        'refreshToken': refreshToken,
+      };
+    } catch (e) {
+      print('Sign-in error: $e');
+      rethrow;
     }
-
-    // Create Gmail subscription (Pub/Sub)
-    final subResp = await http.post(
-      Uri.parse(_createSubscriptionEndpoint),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'fcm_token': fcmToken,
-        'access_token': at,
-        'refresh_token': rt,
-        'email_address': email,
-      }),
-    );
-
-    if (subResp.statusCode == 200) {
-      print('✅ Gmail Pub/Sub subscription created');
-    } else {
-      print('⚠️ Failed to create Gmail subscription: ${subResp.body}');
-    }
-
-    return {'accessToken': at, 'refreshToken': rt};
   }
+
 
   // Gmail API로 이메일 주소 가져오기
   Future<String> _getEmailAddress(String accessToken) async {

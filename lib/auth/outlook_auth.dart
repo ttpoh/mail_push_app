@@ -148,71 +148,79 @@ class OutlookAuthService implements AuthService {
       print('Reusing existing clientState: $clientState');
     }
 
-    final result = await _appAuth.authorizeAndExchangeCode(
-      AuthorizationTokenRequest(
-        _clientId,
-        _redirectUrl,
-        serviceConfiguration: const AuthorizationServiceConfiguration(
-          authorizationEndpoint:
-              'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
-          tokenEndpoint:
-              'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    print('Using redirect URI: $_redirectUrl'); // 디버깅용 로그
+    try {
+      final result = await _appAuth.authorizeAndExchangeCode(
+        AuthorizationTokenRequest(
+          _clientId,
+          _redirectUrl,
+          serviceConfiguration: const AuthorizationServiceConfiguration(
+            authorizationEndpoint:
+                'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
+            tokenEndpoint:
+                'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+          ),
+          scopes: _scopes,
+          additionalParameters: {
+            'prompt': 'login', // 캐시 무시하고 로그인 화면 강제
+          },
         ),
-        scopes: _scopes,
-        additionalParameters: {'prompt': 'consent'},
-      ),
-    );
-    final at = result?.accessToken;
-    final rt = result?.refreshToken;
-    if (at == null || rt == null) {
-      throw Exception('Failed to obtain tokens');
-    }
-    final email = await getOutlookEmail(at);
-    print('User email: $email'); // 디버깅용 로그
-    // 토큰 저장
-    await _storage.write(key: 'outlook_access_token', value: at);
-    await _storage.write(key: 'outlook_refresh_token', value: rt);
-    await _storage.write(key: 'outlook_user_email', value: email);
-
-    // FCM 토큰 획득 및 저장
-    final fcmToken = await FirebaseMessaging.instance.getToken();
-    if (fcmToken == null) {
-      throw Exception('Failed to obtain FCM token');
-    }
-    await _storage.write(key: 'fcm_token', value: fcmToken); // FCM 토큰 저장
-    print('FCM Token obtained: $fcmToken at ${DateTime.now()}');
-
-    final success = await apiClient.registerTokens(
-      fcmToken: fcmToken,
-      accessToken: at,
-      refreshToken: rt,
-      service: serviceName,
-    );
-    if (!success) {
-      throw Exception('Failed to register tokens with server');
-    }  
-
-    // 서브스크립션 생성 호출
-    await Future.delayed(Duration(milliseconds: 300)); // optional delay
-    print('Calling _createSubscription for fcm_token: $fcmToken, client_state: $clientState');
-    await _createSubscription(at, fcmToken, clientState);
-    await listSubscriptions(); // [Optional] 구독 현황 보기
-
-    // 자동 리프레시 타이머
-    final DateTime? expiry = result?.accessTokenExpirationDateTime;
-    if (expiry != null) {
-      final delay = expiry.difference(DateTime.now()) - const Duration(minutes: 5);
-      if (!delay.isNegative) { // 즉시 실행 방지
-        _refreshTimer?.cancel();
-        _refreshTimer = Timer(delay, refreshTokens);
-      } else {
-        print('Refresh timer not set due to negative delay: $delay');
+      ).timeout(const Duration(seconds: 30)); // 타임아웃 설정
+      print('Authorization result: $result');
+      final at = result?.accessToken;
+      final rt = result?.refreshToken;
+      if (at == null || rt == null) {
+        throw Exception('Failed to obtain tokens: $result');
       }
+      final email = await getOutlookEmail(at);
+      print('User email: $email'); // 디버깅용 로그
+      // 토큰 저장
+      await _storage.write(key: 'outlook_access_token', value: at);
+      await _storage.write(key: 'outlook_refresh_token', value: rt);
+      await _storage.write(key: 'outlook_user_email', value: email);
+
+      // FCM 토큰 획득 및 저장
+      final fcmToken = await FirebaseMessaging.instance.getToken();
+      if (fcmToken == null) {
+        throw Exception('Failed to obtain FCM token');
+      }
+      await _storage.write(key: 'fcm_token', value: fcmToken);
+      print('FCM Token obtained: $fcmToken at ${DateTime.now()}');
+
+      final success = await apiClient.registerTokens(
+        fcmToken: fcmToken,
+        accessToken: at,
+        refreshToken: rt,
+        service: serviceName,
+      );
+      if (!success) {
+        throw Exception('Failed to register tokens with server');
+      }
+
+      // 서브스크립션 생성 호출
+      await Future.delayed(Duration(milliseconds: 300));
+      print('Calling _createSubscription for fcm_token: $fcmToken, client_state: $clientState');
+      await _createSubscription(at, fcmToken, clientState);
+      await listSubscriptions();
+
+      // 자동 리프레시 타이머
+      final DateTime? expiry = result?.accessTokenExpirationDateTime;
+      if (expiry != null) {
+        final delay = expiry.difference(DateTime.now()) - const Duration(minutes: 5);
+        if (!delay.isNegative) {
+          _refreshTimer?.cancel();
+          _refreshTimer = Timer(delay, refreshTokens);
+        } else {
+          print('Refresh timer not set due to negative delay: $delay');
+        }
+      }
+
+      return {'accessToken': at, 'refreshToken': rt};
+    } catch (e) {
+      print('Sign-in error: $e');
+      throw e; // 오류를 상위로 전달
     }
-
-    return {'accessToken': at, 'refreshToken': rt};
   }
-
     /// Outlook accessToken을 사용해 로그인된 사용자 이메일 주소를 반환
   Future<String?> getOutlookEmail(String accessToken) async {
     final url = Uri.parse('https://graph.microsoft.com/v1.0/me');

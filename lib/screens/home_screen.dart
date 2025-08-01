@@ -11,6 +11,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:mail_push_app/auth/icloud_auth.dart';
 import 'package:mail_push_app/auth/gmail_auth.dart';
 import 'package:mail_push_app/auth/outlook_auth.dart';
+import 'package:mail_push_app/menu/rule_list_page.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart'; // EventChannel 사용을 위해 추가
 
@@ -149,17 +150,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _handleMailEvent(dynamic event) {
     if (event is Map<dynamic, dynamic>) {
       final mailData = Map<String, dynamic>.from(event);
-      debugPrint('mailData in _handleMailEvent: $mailData');
-      final email = Email(
-        id: int.tryParse(mailData['messageId']?.toString() ?? '') ?? 0, // String을 int로 변환
-        emailAddress: _userEmail ?? '',
-        subject: mailData['subject'] ?? 'No Subject',
-        sender: mailData['sender'] ?? 'Unknown Sender', // sender가 데이터에 없으므로 기본값 설정
-        body: mailData['body'] ?? '',
-        receivedAt: DateTime.now(), // 네이티브에서 시간 정보가 없으면 현재 시간 사용
-        read: false,
-      );
-      _onNewEmail(email);
+      debugPrint('🔔 메일 이벤트 수신: $mailData');
+
+      // subject에서 sender와 subject를 파싱하는 헬퍼 함수
+      String _parseSender(String? subject) {
+        if (subject == null || subject.isEmpty) return 'Unknown Sender';
+
+        // "이름 <email>" 패턴을 찾기 위한 정규 표현식
+        final senderPattern = RegExp(r'^"([^"]+)"\s+<([^>]+)>\s*-');
+        final match = senderPattern.firstMatch(subject);
+
+        if (match != null) {
+          // sender 이름과 이메일 추출
+          final name = match.group(1) ?? 'Unknown Sender'; // 그룹 1: 이름
+          final email = match.group(2) ?? ''; // 그룹 2: 이메일
+          return '$name <$email>';
+        }
+
+        return 'Unknown Sender';
+      }
+
+      // subject에서 sender 부분을 제거하고 실제 제목 추출
+      String getParsedSubject(String? subject) {
+        if (subject == null || subject.isEmpty) return 'No Subject';
+
+        final senderPattern = RegExp(r'^"[^"]+"\s+<[^>]+>\s*-');
+        return subject.replaceFirst(senderPattern, '').trim();
+      }
+
+      // Email.fromJson이 기대하는 구조로 mailData 정규화
+      final normalizedData = {
+        'messageId': mailData['messageId']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString(),
+        'email_address': _userEmail ?? '',
+        'subject': getParsedSubject(mailData['subject']),
+        'sender': _parseSender(mailData['subject']) ?? 'Unknown Sender',
+        'body': mailData['body'] ?? '',
+        'received_at': mailData['received_at']?.toString() ?? DateTime.now().toIso8601String(),
+        'read': mailData['read'] ?? false,
+      };
+
+      try {
+        final email = Email.fromJson(normalizedData);
+        debugPrint('📬 처리된 새 메일: ${email.id}, 제목: ${email.subject}, 발신자: ${email.sender}');
+        _onNewEmail(email);
+      } catch (e) {
+        debugPrint('❌ 메일 이벤트 처리 오류: $e');
+      }
     } else {
       debugPrint('🔔 유효하지 않은 이벤트 데이터: $event');
     }
@@ -210,9 +246,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           PopupMenuButton<String>(
             icon: const Icon(Icons.menu),
             onSelected: (value) async {
-              if (value == 'logout') await _handleLogout();
+              if (value == 'logout') {
+                await _handleLogout();
+              } else if  (value == 'rules') {
+                //규칙 페이지로 이동. 
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const RuleListPage()),
+                );
+              }
             },
             itemBuilder: (_) => [
+              const PopupMenuItem<String>(
+                value: 'rules',
+                child: Text('메일 규칙'), // 또는 'Rules'
+              ),
               const PopupMenuItem<String>(
                 value: 'logout',
                 child: Text('로그아웃'),
