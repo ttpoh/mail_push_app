@@ -161,9 +161,9 @@ class OutlookAuthService implements AuthService {
                 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
           ),
           scopes: _scopes,
-          additionalParameters: {
-            'prompt': 'login', // 캐시 무시하고 로그인 화면 강제
-          },
+          // additionalParameters: {'prompt': 'login',
+          promptValues: ['login'], // 캐시 무시하고 로그인 화면 강제
+          // },
         ),
       ).timeout(const Duration(seconds: 30)); // 타임아웃 설정
       print('Authorization result: $result');

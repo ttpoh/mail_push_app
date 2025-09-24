@@ -39,7 +39,7 @@
 				<string>Editor</string>
 				<key>CFBundleURLSchemes</key>
 				<array>
-					<string>msal7ecd3203-e957-4731-b286-c97c34b21a4a</string>
+					<string>mailapp</string>
 				</array>
 			</dict>
 

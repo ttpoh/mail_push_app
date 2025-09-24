@@ -8,6 +8,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'auth_service.dart';
 import '../api/api_client.dart';
+import 'package:mail_push_app/device/alarm_setting_sync.dart';
+
 
 class GmailAuthService implements AuthService {
   final FlutterAppAuth _appAuth = FlutterAppAuth();
@@ -32,11 +34,19 @@ class GmailAuthService implements AuthService {
   @override
   String get serviceName => 'gmail';
 
+  final AlarmSettingSync _alarmSync =
+      AlarmSettingSync(api: ApiClient()); // 공용 싱크 유틸
+
   GmailAuthService() {
     // FCM 토큰 갱신 리스너 등록
     FirebaseMessaging.instance.onTokenRefresh.listen((newToken) async {
       print('FCM token refreshed: $newToken');
       await _updateServerTokens(newToken);
+
+      final email = await _storage.read(key: 'gmail_user_email');
+      if (email != null && email.isNotEmpty) {
+        await _alarmSync.upsertAfterLogin(email: email, pushFlagsFromPrefs: false);
+      }
     });
   }
 
@@ -74,7 +84,11 @@ class GmailAuthService implements AuthService {
             tokenEndpoint: 'https://oauth2.googleapis.com/token',
           ),
           scopes: _scopes,
-          additionalParameters: {'access_type': 'offline', 'prompt': 'consent'},
+          promptValues: const ['consent', 'select_account'],
+           additionalParameters: const {
+             'access_type': 'offline',
+             'include_granted_scopes': 'true',
+    },
         ),
       );
 
@@ -112,6 +126,13 @@ class GmailAuthService implements AuthService {
         throw Exception('Failed to update tokens on server: ${response.body}');
       }
 
+      await _alarmSync.upsertAfterLogin(email: email, pushFlagsFromPrefs: false); // 로그인과 동시에 서버의 alarm_setting table에 email 저장
+ 
+      // ② 그리고 즉시 서버에서 세팅 로딩하여 로컬 반영
+      print('🔎 signIn → loadFromServerAndSeedPrefs()');
+      final loaded = await _alarmSync.loadFromServerAndSeedPrefs();
+      print('✅ signIn loaded settings from server: $loaded');
+ 
       // Gmail Pub/Sub 구독 생성
       final subResp = await http.post(
         Uri.parse(_createSubscriptionEndpoint),

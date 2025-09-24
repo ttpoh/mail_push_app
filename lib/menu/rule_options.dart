@@ -1,60 +1,49 @@
-// rule_options.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:mail_push_app/models/rule_model.dart';
+import 'package:mail_push_app/api/rule_list_client.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:mail_push_app/ui_kit/constant/event_color.dart' as ec;
 
-final String RULES_API_BASE = "${dotenv.env['SERVER_BASE_URL']}/rules";
-  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+// i18n
+import 'package:mail_push_app/l10n/app_localizations.dart';
 
-enum ConditionType {
-  subjectContains,
-  bodyContains,
-  fromSender,
-}
-
-extension ConditionTypeExt on ConditionType {
-  String get displayName {
+/// ConditionType → 다국어 라벨
+extension ConditionTypeL10n on ConditionType {
+  String localizedLabel(AppLocalizations t) {
     switch (this) {
       case ConditionType.subjectContains:
-        return '제목에 포함';
+        return t.conditionTypeSubjectContains; // 예) "제목에 포함"
       case ConditionType.bodyContains:
-        return '내용에 포함';
+        return t.conditionTypeBodyContains;    // 예) "본문에 포함"
       case ConditionType.fromSender:
-        return '보낸 사람';
+        return t.conditionTypeFromSender;      // 예) "보낸 사람"
     }
   }
 }
 
-class RuleCondition {
-  ConditionType type;
-  List<String> keywords;
-  RuleCondition({
-    required this.type,
-    List<String>? keywords,
-  }) : keywords = List.from(keywords ?? []);
+/// 공통 라이트 카드
+class AppCard extends StatelessWidget {
+  final Widget child;
+  const AppCard({super.key, required this.child});
 
-  RuleCondition.clone(RuleCondition other)
-      : type = other.type,
-        keywords = List.from(other.keywords);
-}
-
-class MailRule {
-  String name;
-  List<RuleCondition> conditions;
-  bool stopFurtherRules;
-  MailRule({
-    required this.name,
-    required this.conditions,
-    this.stopFurtherRules = false,
-  });
-
-  MailRule.clone(MailRule other)
-      : name = other.name,
-        conditions =
-            other.conditions.map((c) => RuleCondition.clone(c)).toList(),
-        stopFurtherRules = other.stopFurtherRules;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: ec.eventLightCardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ec.eventLightBorderColor),
+        boxShadow: [
+          BoxShadow(
+            color: ec.eventLightShadowColor,
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
 }
 
 class RuleOptionsPage extends StatefulWidget {
@@ -70,6 +59,8 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
   late List<RuleCondition> _conditions;
   bool _stopFurther = false;
   String? _nameError;
+  final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  bool _saving = false;
 
   @override
   void initState() {
@@ -92,12 +83,11 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
   }
 
   void _addKeyword(int condIndex, String keyword) {
-    if (keyword.trim().isEmpty) return;
+    final w = keyword.trim();
+    if (w.isEmpty) return;
     setState(() {
       final list = _conditions[condIndex].keywords;
-      if (!list.contains(keyword.trim())) {
-        list.add(keyword.trim());
-      }
+      if (!list.contains(w)) list.add(w);
     });
   }
 
@@ -112,75 +102,64 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
       _conditions.removeAt(condIndex);
     });
   }
-  Future<bool> _sendRuleToServer(MailRule rule, {int? ruleId}) async {
-    final url = ruleId != null
-        ? Uri.parse("$RULES_API_BASE/$ruleId")
-        : Uri.parse(RULES_API_BASE);
 
-    final body = {
-      "name": rule.name,
-      "enabled": true,
-      "stop_further_rules": rule.stopFurtherRules,
-      "conditions": rule.conditions.map((c) {
-        return {
-          "type": c.type.name, // enum 이름: subjectContains, bodyContains, fromSender
-          "keywords": c.keywords,
-        };
-      }).toList(),
-      "fcm_token": await await _secureStorage.read(key: 'fcm_token'), // 현재 사용자 디바이스 토큰
-
-    };
-
+  Future<bool> _sendRuleToServer(MailRule rule) async {
     try {
-      final response = ruleId != null
-          ? await http.put(url,
-              headers: {"Content-Type": "application/json"},
-              body: jsonEncode(body))
-          : await http.post(url,
-              headers: {"Content-Type": "application/json"},
-              body: jsonEncode(body));
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return true;
+      final api = RulesApi();
+      final fcm = await _secureStorage.read(key: 'fcm_token');
+      if (widget.initialRule != null && widget.initialRule!.id != null) {
+        rule.id = widget.initialRule!.id; // 유지
+        await api.updateRule(rule, fcmToken: fcm);
       } else {
-        debugPrint(
-            "Rule save failed (${response.statusCode}): ${response.body}");
-        return false;
+        final newId = await api.createRule(rule, fcmToken: fcm);
+        rule.id = newId;
       }
+      return true;
     } catch (e) {
-      debugPrint("Error sending rule to server: $e");
+      debugPrint("Rule save error: $e");
       return false;
     }
   }
 
   void _saveRule() async {
+    final t = AppLocalizations.of(context)!;
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      setState(() {
-        _nameError = '이름을 입력하세요.';
-      });
+      setState(() => _nameError = t.ruleNameRequired);
       return;
     }
+    if (_conditions.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(t.needAtLeastOneCondition)),
+      );
+      return;
+    }
+    for (var cond in _conditions) {
+      if (cond.keywords.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(t.needKeywordsInAllConditions)),
+        );
+        return;
+      }
+    }
+
+    setState(() => _saving = true);
 
     final MailRule result = MailRule(
       name: name,
       conditions: _conditions,
       stopFurtherRules: _stopFurther,
+      enabled: true,
+      id: widget.initialRule?.id,
     );
 
-    // 서버에 저장 (처음이면 생성, 있으면 수정)
-    int? existingId;
-    if (widget.initialRule != null) {
-      // initialRule이 서버에서 받아온 객체라면 id를 가진다고 가정
-      // 외부에서 id를 확장해서 넣어두는 구조라면 여기서 꺼냄
-      final dynamic maybeId = (widget.initialRule as dynamic).id;
-      if (maybeId is int) existingId = maybeId;
-    }
+    final success = await _sendRuleToServer(result);
+    if (!mounted) return;
+    setState(() => _saving = false);
 
-    final success = await _sendRuleToServer(result, ruleId: existingId);
     if (!success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('규칙 저장 실패, 다시 시도해주세요.')),
+        SnackBar(content: Text(t.ruleSaveFailed)),
       );
       return;
     }
@@ -188,69 +167,89 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
     Navigator.of(context).pop(result);
   }
 
-
   Widget _buildConditionCard(int idx) {
+    final t = AppLocalizations.of(context)!;
     final cond = _conditions[idx];
     final keywordController = TextEditingController();
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: ec.eventLightCardColor,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: ec.eventLightBorderColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: ec.eventLightShadowColor,
+            blurRadius: 8,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 상단 타입 + 삭제
           Row(
             children: [
               Expanded(
-                child: DropdownButton<ConditionType>(
-                  value: cond.type,
-                  underline: const SizedBox(),
-                  isExpanded: true,
-                  onChanged: (v) {
-                    if (v == null) return;
-                    setState(() {
-                      cond.type = v;
-                    });
-                  },
-                  items: ConditionType.values
-                      .map(
-                        (t) => DropdownMenuItem(
-                          value: t,
-                          child: Text(t.displayName),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<ConditionType>(
+                    value: cond.type,
+                    isExpanded: true,
+                    iconEnabledColor: ec.eventLightPrimaryTextColor,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: ec.eventLightPrimaryTextColor,
                         ),
-                      )
-                      .toList(),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setState(() => cond.type = v);
+                    },
+                    items: ConditionType.values
+                        .map(
+                          (ctype) => DropdownMenuItem(
+                            value: ctype,
+                            child: Text(ctype.localizedLabel(t)),
+                          ),
+                        )
+                        .toList(),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
               IconButton(
                 onPressed: () => _removeCondition(idx),
                 icon: const Icon(Icons.close),
-                tooltip: '조건 삭제',
+                color: ec.eventLightUnselectedItemColor,
+                tooltip: t.deleteCondition,
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
+
+          // 키워드 입력 + 추가
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: keywordController,
-                  decoration: const InputDecoration(
-                    hintText: '예: 미팅',
-                    labelText: '키워드 추가',
+                  decoration: InputDecoration(
+                    hintText: t.keywordHint,      // 예: MTG
+                    labelText: t.keywordAddLabel, // 키워드 추가
                     isDense: true,
+                    border: OutlineInputBorder(
+                      borderSide: BorderSide(color: ec.eventLightBorderColor),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: ec.eventLightBorderColor),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: ec.eventPrimaryColor),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                   ),
                   onSubmitted: (v) {
                     _addKeyword(idx, v);
@@ -264,11 +263,18 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
                   _addKeyword(idx, keywordController.text);
                   keywordController.clear();
                 },
-                child: const Text('추가'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ec.eventPrimaryColor,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                ),
+                child: Text(t.add),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+
+          // 키워드 칩
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -277,14 +283,17 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
               return InputChip(
                 label: Text(kw),
                 onDeleted: () => _removeKeyword(idx, kIdx),
+                backgroundColor: Colors.white,
+                side: BorderSide(color: ec.eventLightBorderColor),
               );
             }),
           ),
+
           if (cond.keywords.isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                '키워드를 하나 이상 추가하세요.',
+                t.addAtLeastOneKeyword, // 키워드를 하나 이상 추가하세요.
                 style: TextStyle(color: Colors.red.shade700, fontSize: 12),
               ),
             ),
@@ -294,21 +303,31 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
   }
 
   Widget _buildTitleInput() {
+    final t = AppLocalizations.of(context)!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TextField(
           controller: _nameController,
           decoration: InputDecoration(
-            labelText: '규칙 이름 지정',
-            border: const OutlineInputBorder(),
+            labelText: t.ruleNameLabel, // 규칙 이름
+            border: OutlineInputBorder(
+              borderSide: BorderSide(color: ec.eventLightBorderColor),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: ec.eventLightBorderColor),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderSide: BorderSide(color: ec.eventPrimaryColor),
+              borderRadius: BorderRadius.circular(8),
+            ),
             errorText: _nameError,
           ),
           onChanged: (_) {
             if (_nameError != null && _nameController.text.trim().isNotEmpty) {
-              setState(() {
-                _nameError = null;
-              });
+              setState(() => _nameError = null);
             }
           },
         ),
@@ -332,94 +351,131 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context)!;
     final isEditing = widget.initialRule != null;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F6FA),
+      backgroundColor: ec.eventLightBackgroundColor,
       appBar: AppBar(
-        title: Text(isEditing ? '규칙 수정' : '새 규칙'),
-        backgroundColor: Colors.white,
-        elevation: 1,
+        title: Text(isEditing ? t.ruleEditTitle : t.ruleCreateTitle),
+        backgroundColor: ec.eventLightCardColor,
+        elevation: 0,
         foregroundColor: Colors.black,
         actions: [
           TextButton(
-            onPressed: _saveRule,
-            child: const Text('저장', style: TextStyle(color: Colors.blue)),
+            onPressed: _saving ? null : _saveRule,
+            child: Text(
+              _saving ? t.savingEllipsis : t.save,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildTitleInput(),
-              const SizedBox(height: 16),
-              const Text('조건',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 6),
-              if (_conditions.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.shade300),
-                    borderRadius: BorderRadius.circular(10),
-                    color: Colors.white,
-                  ),
-                  child: const Text(
-                    '조건이 없습니다. 아래 "다른 조건 추가"로 추가하세요.',
-                    style: TextStyle(color: Colors.black54),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: AppCard(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // 규칙 이름
+                      _buildTitleInput(),
+                      const SizedBox(height: 16),
+
+                      // 조건 타이틀
+                      Row(
+                        children: [
+                          Text(
+                            t.conditions, // 조건
+                            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  color: ec.eventLightPrimaryTextColor,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: _addEmptyCondition,
+                            icon: const Icon(Icons.add, size: 18),
+                            label: Text(t.addCondition),
+                            style: TextButton.styleFrom(
+                              foregroundColor: ec.eventPrimaryColor,
+                              textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+
+                      // 조건 목록/없음 안내
+                      if (_conditions.isEmpty)
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: ec.eventLightBorderColor),
+                            borderRadius: BorderRadius.circular(10),
+                            color: Colors.white,
+                          ),
+                          child: Text(
+                            t.noConditionsHint,
+                            style: const TextStyle(color: Colors.black54),
+                          ),
+                        ),
+                      ...List.generate(_conditions.length, (i) => _buildConditionCard(i)),
+                      const SizedBox(height: 16),
+
+                      // 추가 옵션
+                      Row(
+                        children: [
+                          Checkbox(
+                            value: _stopFurther,
+                            activeColor: ec.eventPrimaryColor,
+                            onChanged: (v) => setState(() => _stopFurther = v ?? false),
+                          ),
+                          Expanded(
+                            child: Text(
+                              t.stopFurtherRules, // 이 규칙 이후 처리 중지
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: ec.eventLightPrimaryTextColor,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 20),
+
+                      // 하단 액션
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                            child: Text(t.cancel),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton(
+                            onPressed: _saving ? null : _saveRule,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: ec.eventPrimaryColor,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                              child: Text(_saving ? t.savingEllipsis : t.save),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-              ...List.generate(
-                  _conditions.length, (i) => _buildConditionCard(i)),
-              TextButton.icon(
-                onPressed: _addEmptyCondition,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('다른 조건 추가'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.blue,
-                  textStyle: const TextStyle(fontSize: 14),
-                ),
               ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Checkbox(
-                    value: _stopFurther,
-                    onChanged: (v) {
-                      setState(() {
-                        _stopFurther = v ?? false;
-                      });
-                    },
-                  ),
-                  const Expanded(child: Text('더 이상 규칙 수행 중지')),
-                ],
-              ),
-              const SizedBox(height: 40),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('버리기'),
-                  ),
-                  const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: _saveRule,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue,
-                    ),
-                    child: const Padding(
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      child: Text('저장'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
         ),
       ),
