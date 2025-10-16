@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'dart:io' show Platform;
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -18,12 +20,10 @@ import 'package:mail_push_app/l10n/app_localizations.dart';
 
 import 'widgets/gf_home_app_bar.dart';
 import 'widgets/email_list.dart';
-// ⚠️ 중복 import 제거: 아래 경로 하나만 유지하세요.
 import 'package:mail_push_app/screens/home/dialogs/alarm_settings_dialog.dart';
 import 'package:mail_push_app/ui_kit/constant/event_color.dart' as ec;
 import 'package:mail_push_app/device/alarm_setting_sync.dart';
 
-/// 공통 라이트 카드
 class AppCard extends StatelessWidget {
   final Widget child;
   const AppCard({super.key, required this.child});
@@ -76,38 +76,101 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const _kCriticalOnKey = 'alarm_critical_on';
   static const _kCriticalUntilKey = 'alarm_critical_until_stopped';
 
+  // iOS 네이티브 메일 이벤트 채널
+  static const EventChannel _mailEventChannel =
+      EventChannel('com.secure.mail_push_app/mail_event');
+  StreamSubscription? _mailEventSub;
+
   bool _normalOn = true;
   bool _criticalOn = false;
   bool _criticalUntilStopped = false;
-
-  static const EventChannel _mailEventChannel =
-      EventChannel('com.secure.mail_push_app/mail_events');
-
-  bool get _isICloud =>
-      widget.authService.serviceName.toLowerCase() == 'icloud';
 
   String? _deviceId;
   String? _fcmToken;
   bool _syncing = false;
   late final AlarmSettingSync _alarmSync;
 
+  /// messageId → 점 색상 (규칙 우선)
+  final Map<String, Color> _alarmDotByMsgId = {};
+
+  // inbox ValueNotifier 구독용 리스너 참조
+  VoidCallback? _inboxListener;
+
+  Color _colorForLevel(String? level) {
+    switch ((level ?? 'normal').toLowerCase()) {
+      case 'until':
+        return Colors.red;
+      case 'critical':
+        return Colors.orange;
+      default:
+        return Colors.green;
+    }
+  }
+
+  final Set<String> _seenEventKeys = <String>{};
+  static const int _maxSeen = 500;
+
+  String _eventDedupeKey(Map<String, dynamic> ev, Map<String, dynamic>? md) {
+    final mid = (ev['messageId'] ?? md?['messageId'] ?? '').toString();
+    final ver = (ev['ruleVersion'] ?? md?['ruleVersion'] ?? 'v0').toString();
+    // final ch  = (ev['pushChannel'] ?? md?['pushChannel'] ?? 'alert').toString();
+    return '$mid:$ver';
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadAlarmSettings();
-    _initializeFcmAndLoadData();
-    _alarmSync = AlarmSettingSync(api: widget.apiClient);
 
-    _mailEventChannel.receiveBroadcastStream().listen(
-      _handleMailEvent,
-      onError: (error) => debugPrint('🔔 EventChannel 오류: $error'),
-    );
+    // 🔸 중복 파이프 제거를 위해 콜백 등록하지 않음
+    // widget.fcmService.setOnNewEmailCallback(_onNewEmail);
+
+    _initializeFcmAndLoadData();
+
+    _alarmSync = AlarmSettingSync(api: widget.apiClient);
+    _loadAlarmSettings();
+
+    // ✅ FcmService.inbox 변화를 홈 리스트에 즉시 반영 (단일 파이프)
+    _inboxListener = () {
+      if (!mounted) return;
+      final fromInbox = FcmService.inbox.value;
+      if (fromInbox.isEmpty) return;
+
+      final existing = _emails.map((e) => e.id).toSet();
+      bool changed = false;
+      for (final e in fromInbox) {
+        if (e.id.isNotEmpty && !existing.contains(e.id)) {
+          _emails.insert(0, e);
+          existing.add(e.id);
+          changed = true;
+        }
+      }
+      if (changed) setState(() {});
+    };
+    FcmService.inbox.addListener(_inboxListener!);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      try {
+        widget.fcmService.ensureForegroundListeners?.call();
+      } catch (_) {}
+      _mailEventSub ??= _mailEventChannel
+          .receiveBroadcastStream()
+          .listen(_handleMailEvent, onError: (e) {
+        debugPrint('❌ mail_event error: $e');
+      });
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _mailEventSub?.cancel();
+    _mailEventSub = null;
+
+    if (_inboxListener != null) {
+      FcmService.inbox.removeListener(_inboxListener!);
+      _inboxListener = null;
+    }
     super.dispose();
   }
 
@@ -124,7 +187,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         platform: Platform.isIOS ? 'ios' : 'android',
         fcmToken: _fcmToken,
       );
-      debugPrint('🧭 초기 업서트 완료 deviceId=$_deviceId, platform=${Platform.isIOS ? 'ios' : 'android'}');
+      debugPrint(
+          '🧭 초기 업서트 완료 deviceId=$_deviceId, platform=${Platform.isIOS ? 'ios' : 'android'}');
     } catch (e) {
       debugPrint('⚠️ _upsertInitialDevice 실패: $e');
     }
@@ -154,7 +218,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         criticalOn: _criticalOn,
         criticalUntilStopped: _criticalUntilStopped,
       );
-      debugPrint('🧭 이메일/알람 업서트 완료 email=$email normal=$_normalOn critical=$_criticalOn until=$_criticalUntilStopped');
+      debugPrint(
+          '🧭 이메일/알람 업서트 완료 email=$email normal=$_normalOn critical=$_criticalOn until=$_criticalUntilStopped');
     } catch (e) {
       debugPrint('⚠️ _upsertEmailAndFlags 실패: $e');
     } finally {
@@ -172,17 +237,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     await _upsertInitialDevice();
-
-    widget.fcmService.setOnNewEmailCallback(_onNewEmail);
     await _loadUserEmail();
     await _checkInitialMessage();
-    if (!_isICloud) await _fetchAndSetEmails();
+    if (!mounted) return;
+    if (widget.authService.serviceName.toLowerCase() != 'icloud') {
+      await _fetchAndSetEmails();
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.resumed && !_isICloud) {
+    if (state == AppLifecycleState.resumed &&
+        widget.authService.serviceName.toLowerCase() != 'icloud') {
       _fetchAndSetEmails();
     }
   }
@@ -221,17 +288,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         throw Exception(AppLocalizations.of(context)!.noLoggedInEmail);
       }
       final emails = await widget.apiClient.fetchEmails(service, emailAddress);
+
       if (!mounted) return;
       setState(() {
         _emails
           ..clear()
           ..addAll(emails);
       });
+
+      // 서버 저장 등급을 점 색상 캐시에 반영 (규칙 우선)
+      for (final e in emails) {
+        final level = e.ruleAlarm ?? e.effectiveAlarm;
+        if (level != null && e.id.isNotEmpty) {
+          _alarmDotByMsgId[e.id] = _colorForLevel(level);
+        }
+      }
+
       debugPrint('📥 목록 동기화 완료: ${emails.length}건');
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context)!.emailLoadFailed('$e'))),
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.emailLoadFailed('$e')),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isFetching = false);
@@ -243,9 +322,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       _normalOn = prefs.getBool(_kNormalOnKey) ?? true;
       _criticalOn = prefs.getBool(_kCriticalOnKey) ?? false;
-      _criticalUntilStopped = prefs.getBool(_kCriticalUntilKey) ?? false;
+      _criticalUntilStopped =
+          prefs.getBool(_kCriticalUntilKey) ?? false;
     });
-    debugPrint('🔧 로컬 알람 설정: normal=$_normalOn, critical=$_criticalOn, until=$_criticalUntilStopped');
+    debugPrint(
+        '🔧 로컬 알람 설정: normal=$_normalOn, critical=$_criticalOn, until=$_criticalUntilStopped');
   }
 
   Future<void> _persistSettings() async {
@@ -281,9 +362,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // 새 메일 도착 시: 낙관적 prepend 후 증분 동기화
+  // 새 메일 도착 시: 낙관적 prepend → 이후 증분 동기화
   Future<void> _onNewEmail(Email email) async {
     if (!mounted) return;
+
+    // messageId 기준 색상 보강 (규칙 우선)
+    try {
+      final dyn = email as dynamic;
+      final String? effective = dyn.effectiveAlarm ?? dyn.extra?['effectiveAlarm'];
+      final String? ruleAlarm  = dyn.ruleAlarm ?? dyn.extra?['ruleAlarm'];
+      final level = (ruleAlarm?.toString().isNotEmpty ?? false)
+          ? ruleAlarm!.toString()
+          : (effective?.toString() ?? 'normal');
+
+      final String msgId = (dyn.messageId ?? email.id).toString();
+      if (msgId.isNotEmpty) {
+        _alarmDotByMsgId[msgId] = _colorForLevel(level);
+      }
+    } catch (_) {}
 
     final currentEmail = _userEmail;
     if (currentEmail != null &&
@@ -307,13 +403,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final emailAddress = await widget.authService.getCurrentUserEmail();
       if (emailAddress == null || emailAddress.isEmpty) return;
 
-      DateTime? newest = _emails.isNotEmpty ? _emails.first.receivedAt : null;
+      DateTime? newest =
+          _emails.isNotEmpty ? _emails.first.receivedAt : null;
       final sinceIso = newest != null
-          ? newest.toUtc().subtract(const Duration(seconds: 2)).toIso8601String()
+          ? newest
+              .toUtc()
+              .subtract(const Duration(seconds: 2))
+              .toIso8601String()
           : null;
 
       final fetched = sinceIso != null
-          ? await widget.apiClient.fetchEmails(service, emailAddress, since: sinceIso)
+          ? await widget.apiClient
+              .fetchEmails(service, emailAddress, since: sinceIso)
           : await widget.apiClient.fetchEmails(service, emailAddress);
 
       final existingIds = _emails.map((e) => e.id).toSet();
@@ -329,7 +430,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ..clear()
           ..addAll(merged);
       });
-      debugPrint('🔗 증분 동기화 완료(+${merged.length - _emails.length})');
+      debugPrint('🔗 증분 동기화 완료');
     } catch (e) {
       debugPrint('❌ _onNewEmail 동기화 실패: $e');
     } finally {
@@ -337,16 +438,56 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // iOS EventChannel 수신 → sender/received_at 우선 사용
+  // iOS EventChannel 수신 → sender/received_at 우선 사용 + 색상 캐싱
   void _handleMailEvent(dynamic event) {
     if (event is! Map) return;
-    final mailData = Map<String, dynamic>.from(event as Map);
-    debugPrint('📡 이벤트 수신: $mailData');
+    final ev = Map<String, dynamic>.from(event as Map);
+    debugPrint('📡 이벤트 수신: $ev');
 
-    // sender 우선 사용, 없으면 subject에서 fallback
-    String sender = (mailData['sender'] as String?)?.trim() ?? '';
+    // mailData: Map 또는 String(JSON) 모두 안전 파싱
+    Map<String, dynamic>? md;
+    final rawMd = ev['mailData'];
+    if (rawMd is Map) {
+      md = Map<String, dynamic>.from(rawMd);
+    } else if (rawMd is String) {
+      try { md = Map<String, dynamic>.from(jsonDecode(rawMd)); } catch (_) {}
+    }
+    final key = _eventDedupeKey(ev, md);
+    if (key.isNotEmpty) {
+      if (_seenEventKeys.contains(key)) {
+        debugPrint('🚫 (Dart) EC duplicate: $key');
+        return;
+      }
+      _seenEventKeys.add(key);
+      if (_seenEventKeys.length > _maxSeen) {
+        // 아주 단순한 LRU-ish 정리
+        _seenEventKeys.remove(_seenEventKeys.first);
+      }
+    }
+
+    // 1) 규칙/유효 알람 둘 다 보존
+    final String? ruleAlarm =
+        (ev['ruleAlarm'] as String?) ?? (md?['ruleAlarm'] as String?);
+    final String? effectiveAlarm =
+        (ev['effectiveAlarm'] as String?) ?? (md?['effectiveAlarm'] as String?);
+
+    // 2) 표시 레벨: 규칙 우선 → effective → normal
+    final String showLevel = (ruleAlarm != null && ruleAlarm.isNotEmpty)
+        ? ruleAlarm
+        : (effectiveAlarm ?? 'normal');
+
+    // 3) 점 색상 캐시 업데이트 (규칙 우선 표시 기준 사용)
+    try {
+      final msgId = (ev['messageId']?.toString()) ??
+          (md?['messageId']?.toString()) ??
+          DateTime.now().millisecondsSinceEpoch.toString();
+      _alarmDotByMsgId[msgId] = _colorForLevel(showLevel);
+    } catch (_) {}
+
+    // 4) sender 파싱(메일데이터 우선 → 이벤트 상위 → 폴백)
+    String sender = (md?['sender'] as String? ?? ev['sender'] as String? ?? '').trim();
     if (sender.isEmpty) {
-      final subj = (mailData['subject'] as String?) ?? '';
+      final subj = (md?['subject'] as String?) ?? (ev['subject'] as String?) ?? '';
       final m = RegExp(r'^"([^"]+)"\s+<([^>]+)>\s*-').firstMatch(subj);
       if (m != null) {
         final name = m.group(1) ?? '';
@@ -359,21 +500,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
-    final normalized = {
-      'messageId': mailData['messageId']?.toString() ??
-          DateTime.now().millisecondsSinceEpoch.toString(),
-      'email_address': (mailData['email_address'] as String?) ?? (_userEmail ?? ''),
-      'subject': (mailData['subject'] as String?) ?? AppLocalizations.of(context)!.noSubject,
+    // 5) subject/email_address/received_at 등 폴백 계층 정리 (mailData 우선)
+    final normalized = <String, dynamic>{
+      // ✅ 메일 고유 ID 우선 사용
+      'messageId': (md?['message_id']?.toString()) ??
+                  (md?['messageId']?.toString()) ??
+                  (ev['messageId']?.toString()) ??
+                  DateTime.now().millisecondsSinceEpoch.toString(),
+      'email_address': (md?['email_address'] as String?) ??
+          (ev['email_address'] as String?) ??
+          (_userEmail ?? ''),
+      'subject': (md?['subject'] as String?) ??
+          (ev['subject'] as String?) ??
+          AppLocalizations.of(context)!.noSubject,
       'sender': sender,
-      'body': (mailData['body'] as String?) ?? '',
-      'received_at': (mailData['received_at']?.toString()) ??
+      'body': (md?['body'] as String?) ?? (ev['body'] as String?) ?? '',
+      'received_at': (md?['received_at']?.toString()) ??
+          (ev['received_at']?.toString()) ??
           DateTime.now().toUtc().toIso8601String(),
-      'read': mailData['read'] ?? false,
+      'read': (md?['read']) ?? (ev['read']) ?? false,
+
+      'ruleAlarm': ruleAlarm ?? '',
+      'effectiveAlarm': effectiveAlarm ?? '',
     };
 
     try {
       final email = Email.fromJson(normalized);
-      _onNewEmail(email);
+        // 2) 보강: id와 messageId를 동일하게(=normalized['messageId'])
+      final fixedId = normalized['messageId']!.toString();
+      final emailFixed = email.id == fixedId ? email : email.copyWith(id: fixedId);
+
+      // 3) (선택) 동일 메일 콘텐츠지만 과거 잘못된 ID(FCM ID)로 들어온 중복을 정리
+      _emails.removeWhere((e) =>
+        e.emailAddress == emailFixed.emailAddress &&
+        e.subject == emailFixed.subject &&
+        e.sender == emailFixed.sender &&
+        e.body == emailFixed.body &&
+        e.id != fixedId
+      );
+      // [CHANGED] EventChannel → FcmService 단일 파이프로 합치기
+      widget.fcmService.emitEmailDirect(email);
+      // (이전에는 _onNewEmail(email) 를 직접 호출 → 중복 경로 생성)
     } catch (e) {
       debugPrint('❌ 메일 이벤트 파싱 오류: $e');
     }
@@ -395,12 +562,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context)!.logoutFailed('$e'))),
+        SnackBar(
+            content: Text(
+                AppLocalizations.of(context)!.logoutFailed('$e'))),
       );
     }
   }
 
-  void _openAlarmDialog() {
+  void _openAlarmDialog() async {
+    await widget.fcmService.isAlarmLoopRunning();
+
     showAlarmSettingsDialog(
       context: context,
       normalOn: _normalOn,
@@ -423,6 +594,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         await _upsertEmailAndFlags();
       },
       onOpenAppNotificationSettings: _openAppNotificationSettings,
+      onStopAlarm: () async {
+        try {
+          await widget.fcmService.stopAlarmByUser();
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('긴급 알람을 중지했습니다')),
+            );
+          }
+        } catch (e) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('알람 중지 실패: $e')),
+            );
+          }
+        }
+      },
     );
   }
 
@@ -434,23 +621,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _openEmail(Email email, int index) async {
     if (!email.read) {
       setState(() {
-        _emails[index] = Email(
-          id: email.id,
-          emailAddress: email.emailAddress,
-          subject: email.subject,
-          sender: email.sender,
-          body: email.body,
-          receivedAt: email.receivedAt,
-          read: true,
-        );
+        _emails[index] = email.copyWith(read: true);
       });
+
+      try {
+        final service = widget.authService.serviceName.toLowerCase();
+        final owner = await widget.authService.getCurrentUserEmail();
+        if (owner != null && owner.isNotEmpty) {
+          await widget.apiClient.markEmailRead(
+            service: service,
+            emailAddress: owner,
+            messageId: email.id,
+            read: true,
+          );
+        }
+      } catch (e) {
+        debugPrint('markEmailRead failed: $e');
+      }
     }
 
     try {
       await widget.fcmService.stopAlarmByUser();
-    } catch (e) {
-      debugPrint('stopAlarmByUser failed: $e');
-    }
+    } catch (_) {}
 
     if (!mounted) return;
     Navigator.pushNamed(context, '/mail_detail', arguments: email);
@@ -483,7 +675,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         padding: const EdgeInsets.symmetric(vertical: 40),
                         child: Text(
                           t.waitingNewEmails,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(
                                 color: ec.eventLightSecondaryTextColor,
                               ),
                         ),
@@ -492,8 +687,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   : Padding(
                       padding: const EdgeInsets.all(8.0),
                       child: EmailList(
+                        key: ValueKey(_emails.length),
                         emails: _emails,
                         onOpenEmail: _openEmail,
+                        // ✅ 점 색상: 캐시 우선 → 규칙 우선 → 기본
+                        dotColorResolver: (email) {
+                          final cached = _alarmDotByMsgId[email.id];
+                          if (cached != null) return cached;
+                          final level = email.ruleAlarm ?? email.effectiveAlarm ?? 'normal';
+                          return _colorForLevel(level);
+                        },
                       ),
                     ),
             ),

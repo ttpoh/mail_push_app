@@ -194,6 +194,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get criticalMustBeOnForUntilStopped => 'Critical must be ON to use ‘Until Stopped’ mode.';
 
   @override
+  String get stopEmergencyAlarm => 'Stop Emergency Alarm';
+
+  @override
+  String get keywordLogicLabel => 'Keyword Logic';
+
+  @override
+  String get logicAnd => 'AND (must match all)';
+
+  @override
+  String get logicOr => 'OR (match any)';
+
+  @override
+  String get needLogicForConditions => 'Please choose keyword logic (AND / OR) for each condition.';
+
+  @override
   String get loginTitle => 'Login';
 
   @override

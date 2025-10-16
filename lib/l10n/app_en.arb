@@ -69,6 +69,14 @@
   "@criticalMustBeOnForUntilStopped": {
     "description": "Shown when user enables 'Until Stopped' while critical is off."
   },
+  "stopEmergencyAlarm": "Stop Emergency Alarm",
+  "@stopEmergencyAlarm": {
+    "description": "Button label to stop the critical until alarm loop"
+  },
+  "keywordLogicLabel": "Keyword Logic",
+  "logicAnd": "AND (must match all)",
+  "logicOr": "OR (match any)",
+  "needLogicForConditions": "Please choose keyword logic (AND / OR) for each condition.",
 
   "loginTitle": "Login",
   "langKorean": "한국어",

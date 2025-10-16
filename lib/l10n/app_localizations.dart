@@ -439,6 +439,36 @@ abstract class AppLocalizations {
   /// **'Critical must be ON to use ‘Until Stopped’ mode.'**
   String get criticalMustBeOnForUntilStopped;
 
+  /// Button label to stop the critical until alarm loop
+  ///
+  /// In en, this message translates to:
+  /// **'Stop Emergency Alarm'**
+  String get stopEmergencyAlarm;
+
+  /// No description provided for @keywordLogicLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Keyword Logic'**
+  String get keywordLogicLabel;
+
+  /// No description provided for @logicAnd.
+  ///
+  /// In en, this message translates to:
+  /// **'AND (must match all)'**
+  String get logicAnd;
+
+  /// No description provided for @logicOr.
+  ///
+  /// In en, this message translates to:
+  /// **'OR (match any)'**
+  String get logicOr;
+
+  /// No description provided for @needLogicForConditions.
+  ///
+  /// In en, this message translates to:
+  /// **'Please choose keyword logic (AND / OR) for each condition.'**
+  String get needLogicForConditions;
+
   /// No description provided for @loginTitle.
   ///
   /// In en, this message translates to:

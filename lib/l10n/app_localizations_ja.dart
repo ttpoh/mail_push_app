@@ -194,6 +194,21 @@ class AppLocalizationsJa extends AppLocalizations {
   String get criticalMustBeOnForUntilStopped => '停止するまで鳴動を使うには、緊急通知をONにしてください。';
 
   @override
+  String get stopEmergencyAlarm => '緊急アラームを停止';
+
+  @override
+  String get keywordLogicLabel => 'キーワードロジック';
+
+  @override
+  String get logicAnd => 'AND（すべて一致）';
+
+  @override
+  String get logicOr => 'OR（いずれか一致）';
+
+  @override
+  String get needLogicForConditions => '各条件のキーワードロジック（AND / OR）を選択してください。';
+
+  @override
   String get loginTitle => 'ログイン';
 
   @override

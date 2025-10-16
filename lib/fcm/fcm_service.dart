@@ -9,10 +9,59 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mail_push_app/models/email.dart';
 import 'package:mail_push_app/utils/navigation_service.dart';
+import 'package:flutter/foundation.dart' show ValueNotifier, defaultTargetPlatform, TargetPlatform;
+
+String _dedupeKeyFromData(Map<String, dynamic> d, String? fallbackMsgId) {
+  // 1) mailData에서 메일 고유 ID를 먼저 시도
+  String? mailId;
+  final md = d['mailData'];
+  if (md is String) {
+    try {
+      final m = jsonDecode(md);
+      mailId = (m['message_id'] ?? m['messageId'])?.toString();
+    } catch (_) {}
+  } else if (md is Map) {
+    mailId = (md['message_id'] ?? md['messageId'])?.toString();
+  }
+
+  final ver = (d['ruleVersion'] ?? 'v0').toString();
+
+  // 2) 메일 ID가 있으면 채널 상관없이 mailId+ver 로 키 생성
+  if (mailId != null && mailId.isNotEmpty) {
+    return '$mailId:$ver';
+  }
+
+  // 3) 없으면 FCM ID로 폴백(이때도 채널은 키에서 제외해 중복 억제)
+  final mid = (d['messageId'] ?? fallbackMsgId ?? '').toString();
+  return '$mid:$ver';
+}
+
 
 class AlarmSettingsStore {
   static const _kCriticalOn = 'criticalOn';
   static const _kLastMsgId = 'last_message_id';
+  static const _kLastTtsId = 'last_tts_message_id';
+  static const _kProcessedIds = 'processed_ids_cache';
+  static const _kMaxCacheSize = 500;
+
+  static Future<void> _addToProcessedCache(String id) async {
+    final sp = await SharedPreferences.getInstance();
+    final cacheStr = sp.getString(_kProcessedIds) ?? '';
+    final cacheIds = cacheStr.isNotEmpty ? cacheStr.split(',') : <String>[];
+    if (cacheIds.length >= _kMaxCacheSize) {
+      await sp.remove(_kProcessedIds);
+    } else {
+      cacheIds.add(id);
+      await sp.setString(_kProcessedIds, cacheIds.join(','));
+    }
+  }
+
+  static Future<bool> _isInProcessedCache(String id) async {
+    final sp = await SharedPreferences.getInstance();
+    final cacheStr = sp.getString(_kProcessedIds) ?? '';
+    if (cacheStr.isEmpty) return false;
+    return cacheStr.split(',').contains(id);
+  }
 
   static Future<void> setCriticalOn(bool v) async {
     final sp = await SharedPreferences.getInstance();
@@ -24,20 +73,41 @@ class AlarmSettingsStore {
     return sp.getBool(_kCriticalOn) ?? true;
   }
 
-  static Future<bool> isDuplicateAndMark(String id) async {
+  static Future<bool> isDuplicateAndMark(
+    String id, {
+    bool syncToNative = false,
+  }) async {
     if (id.isEmpty) return true;
-    final sp = await SharedPreferences.getInstance();
-    final last = sp.getString(_kLastMsgId);
-    if (last == id) return true;
-    await sp.setString(_kLastMsgId, id);
-    if (Platform.isIOS) {
+    if (await _isInProcessedCache(id)) {
+      debugPrint('🚫 Dart cache hit: $id');
+      return true;
+    }
+    await _addToProcessedCache(id);
+    if (syncToNative && Platform.isIOS) {
       try {
-        await const MethodChannel('com.secure.mail_push_app/sync').invokeMethod('syncMessageId', {'id': id});
+        await const MethodChannel('com.secure.mail_push_app/sync')
+            .invokeMethod('syncMessageId', {'id': id});
+        debugPrint('✅ Synced with native: $id');
       } catch (e) {
         debugPrint('❌ Failed to sync message ID with native: $e');
       }
     }
     return false;
+  }
+
+  static Future<bool> isDuplicateTtsAndMark(String id) async {
+    if (id.isEmpty) return true;
+    final sp = await SharedPreferences.getInstance();
+    final last = sp.getString(_kLastTtsId);
+    if (last == id) return true;
+    await sp.setString(_kLastTtsId, id);
+    return false;
+  }
+
+  static Future<void> clearProcessedCache() async {
+    final sp = await SharedPreferences.getInstance();
+    await sp.remove(_kProcessedIds);
+    debugPrint('✅ Processed cache cleared');
   }
 }
 
@@ -50,6 +120,8 @@ class FcmService {
   final FlutterLocalNotificationsPlugin _notificationsPlugin =
       FlutterLocalNotificationsPlugin();
 
+  static final ValueNotifier<bool> loopRunning = ValueNotifier(false);
+
   Function(Email)? _onNewEmailCallback;
   bool _initialized = false;
 
@@ -61,13 +133,33 @@ class FcmService {
   static const MethodChannel _alarmLoopChannel =
       MethodChannel('com.secure.mail_push_app/alarm_loop');
 
-  Future<RemoteMessage?> getInitialMessage() async {
-    return await _fcm.getInitialMessage();
+  // ===== 실시간 파이프 =====
+  final _emailStreamCtrl = StreamController<Email>.broadcast();
+  Stream<Email> get emailStream => _emailStreamCtrl.stream;
+  static final ValueNotifier<List<Email>> inbox = ValueNotifier<List<Email>>([]);
+
+  void _emitEmail(Email e) {
+    // id 기준 중복 방지
+    if ((e.id).isEmpty) return; // [CHANGED] 안전 가드
+    final cur = List<Email>.from(inbox.value);
+    final exists = cur.any((x) => x.id == e.id);
+    if (!exists) {
+      cur.insert(0, e);
+      inbox.value = cur;
+      _emailStreamCtrl.add(e);
+    }
+    _onNewEmailCallback?.call(e);
   }
 
-  void handleNewEmail(RemoteMessage message) {
-    _handleNewEmail(message);
-  }
+  // [ADDED] HomeScreen이 EventChannel 수신을 단일 파이프로 합치도록 공개 래퍼
+  void emitEmailDirect(Email e) => _emitEmail(e);
+
+  // ========================
+
+  Future<void> ensureForegroundListeners() async => initialize();
+  Future<RemoteMessage?> getInitialMessage() => _fcm.getInitialMessage();
+
+  void handleNewEmail(RemoteMessage message) => _handleNewEmail(message);
 
   void setOnNewEmailCallback(Function(Email) cb) {
     _onNewEmailCallback = cb;
@@ -77,22 +169,59 @@ class FcmService {
   Future<void> initialize() async {
     if (_initialized) return;
 
-    final settings = await _fcm.requestPermission(
-      alert: true, badge: true, sound: true,
-    );
+    final settings =
+        await _fcm.requestPermission(alert: true, badge: true, sound: true);
     if (settings.authorizationStatus != AuthorizationStatus.authorized) {
       debugPrint('❌ 알림 권한 거부됨');
       return;
     }
 
     const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const iosInit = DarwinInitializationSettings(requestCriticalPermission: true);
+    const iosInit = DarwinInitializationSettings(
+      requestCriticalPermission: true,
+      requestAlertPermission: true,
+      requestSoundPermission: true,
+      requestBadgePermission: true,
+    );
     await _notificationsPlugin.initialize(
       const InitializationSettings(android: androidInit, iOS: iosInit),
       onDidReceiveNotificationResponse: (details) async {
-        debugPrint('👆 알림 클릭됨 → 루프 stop & 상세 진입');
         await _stopLoop();
         if (details.payload != null) {
+          try {
+            final data = jsonDecode(details.payload!);
+            final key = _dedupeKeyFromData(
+              Map<String, dynamic>.from(data),
+              null,
+            );
+            final ch = (data['pushChannel'] ?? 'alert').toString();
+            final isDup = await AlarmSettingsStore.isDuplicateAndMark(
+              key,
+              syncToNative: Platform.isIOS && ch == 'bg',
+            );
+            if (!isDup) {
+              final mailMap = data['mailData'] != null
+                  ? jsonDecode(data['mailData'])
+                  : <String, dynamic>{};
+              final email = Email(
+                id: (data['messageId'] ??
+                        DateTime.now().millisecondsSinceEpoch.toString())
+                    .toString(),
+                emailAddress: (mailMap['email_address'] ?? '').toString(),
+                subject:
+                    (mailMap['subject'] ?? data['subject'] ?? '').toString(),
+                sender: (mailMap['sender'] ?? data['sender'] ?? 'Unknown Sender')
+                    .toString(),
+                body: (mailMap['body'] ?? data['body'] ?? '').toString(),
+                receivedAt: mailMap['received_at'] != null
+                    ? DateTime.parse(mailMap['received_at'])
+                    : DateTime.now(),
+                read: false,
+                ruleAlarm: (data['ruleAlarm'] as String?)?.trim(),
+              );
+              _emitEmail(email);
+            }
+          } catch (_) {}
           _navigateToDetailFromPayload(details.payload!);
         } else {
           NavigationService.instance.navigateTo('/home');
@@ -101,48 +230,66 @@ class FcmService {
     );
 
     final androidPlugin = _notificationsPlugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>();
     if (androidPlugin != null) {
-      await androidPlugin.createNotificationChannel(const AndroidNotificationChannel(
-        _chGeneralId, _chGeneralName,
-        description: 'General (no sound)',
-        importance: Importance.defaultImportance,
-        playSound: false, enableVibration: false,
-      ));
-      await androidPlugin.createNotificationChannel(const AndroidNotificationChannel(
-        _chCriticalId, _chCriticalName,
-        description: 'Critical (with sound)',
-        importance: Importance.max,
-        playSound: true, enableVibration: true,
-      ));
+      await androidPlugin.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _chGeneralId,
+          _chGeneralName,
+          description: 'General (no sound)',
+          importance: Importance.defaultImportance,
+          playSound: false,
+          enableVibration: false,
+        ),
+      );
+      await androidPlugin.createNotificationChannel(
+        const AndroidNotificationChannel(
+          _chCriticalId,
+          _chCriticalName,
+          description: 'Critical (with sound)',
+          importance: Importance.max,
+          playSound: true,
+          enableVibration: true,
+        ),
+      );
     }
 
+    // 포그라운드
     FirebaseMessaging.onMessage.listen((msg) async {
-      debugPrint('🔔 포그라운드 메시지 수신: ${msg.messageId}');
       if (!await _shouldProcess(msg)) return;
+
+      if (Platform.isIOS) {
+        // [CHANGED] iOS 포그라운드: EventChannel이 리스트 반영 → 여기선 emit 금지
+        await _showNotification(msg);
+        return;
+      }
+
+      // Android 등: 여기서만 emit
+      _handleNewEmail(msg); // [CHANGED] (플랫폼 분기)
       await _showNotification(msg);
-      _handleNewEmail(msg);
     });
 
+    // 알림 탭(메시지 객체 제공됨)
     FirebaseMessaging.onMessageOpenedApp.listen((msg) async {
-      debugPrint('🔔 메시지 클릭으로 앱 열림: ${msg.messageId}');
       if (!await _shouldProcess(msg)) return;
-      _handleNewEmail(msg);
+      _handleNewEmail(msg);      // 탭 시에는 단일 경로
       await _stopLoop();
       _navigateToDetail(msg);
     });
 
+    // cold start
     final initialMsg = await getInitialMessage();
-    if (initialMsg != null) {
-      debugPrint('🔔 초기 메시지 처리: ${initialMsg.messageId}');
-      if (await _shouldProcess(initialMsg)) {
-        _handleNewEmail(initialMsg);
-        await _stopLoop();
-        _navigateToDetail(initialMsg);
-      }
+    if (initialMsg != null && await _shouldProcess(initialMsg)) {
+      _handleNewEmail(initialMsg);
+      await _stopLoop();
+      _navigateToDetail(initialMsg);
     }
 
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+    if (defaultTargetPlatform != TargetPlatform.iOS) {
+      FirebaseMessaging.onBackgroundMessage(
+          _firebaseMessagingBackgroundHandler);
+    }
 
     _initialized = true;
     debugPrint('✅ FcmService 초기화 완료');
@@ -151,28 +298,31 @@ class FcmService {
   Map<String, String> _buildTtsForLocale({String? subject, String? body}) {
     final locale = WidgetsBinding.instance.platformDispatcher.locale;
     final langCode = locale.languageCode.toLowerCase();
-
     const defaultTexts = {
       'ko': '긴급 메일이 도착했습니다',
       'ja': '緊急メールが届きました',
       'en': 'An emergency email has arrived',
       'zh': '您收到紧急邮件',
     };
-
     const ttsLangMap = {
-      'ko': 'ko-KR', 'ja': 'ja-JP', 'en': 'en-US', 'zh': 'zh-CN',
+      'ko': 'ko-KR',
+      'ja': 'ja-JP',
+      'en': 'en-US',
+      'zh': 'zh-CN'
     };
-
     String pickText(String lang) {
-      final s = (subject ?? '');
-      final b = (body ?? '');
-      final hasMeeting = s.contains('미팅') || b.contains('미팅');
-      if (hasMeeting) {
+      final s = (subject ?? ''), b = (body ?? '');
+      final meet = s.contains('미팅') || b.contains('미팅');
+      if (meet) {
         switch (lang) {
-          case 'ko': return '미팅 관련 메일이 도착했습니다';
-          case 'ja': return 'ミーティングのメールが届きました';
-          case 'zh': return '您收到会议相关邮件';
-          default:   return 'A meeting-related email has arrived';
+          case 'ko':
+            return '미팅 관련 메일이 도착했습니다';
+          case 'ja':
+            return 'ミーティングのメールが届きました';
+          case 'zh':
+            return '您收到会议相关邮件';
+          default:
+            return 'A meeting-related email has arrived';
         }
       }
       return defaultTexts[lang] ?? defaultTexts['en']!;
@@ -190,15 +340,19 @@ class FcmService {
       return false;
     }
 
-    final messageId = (data['messageId'] ?? message.messageId ?? '').toString();
-    if (messageId.isEmpty) {
-      debugPrint('🚫 messageId 누락 → 무시');
+    final key = _dedupeKeyFromData(data, message.messageId);
+    if (key.isEmpty) {
+      debugPrint('🚫 dedupe key 생성 실패 → 무시');
       return false;
     }
 
-    final dup = await AlarmSettingsStore.isDuplicateAndMark(messageId);
+    final ch = (data['pushChannel'] ?? 'alert').toString();
+    final dup = await AlarmSettingsStore.isDuplicateAndMark(
+      key,
+      syncToNative: Platform.isIOS && ch == 'bg',
+    );
     if (dup) {
-      debugPrint('🚫 중복 messageId=$messageId → 무시');
+      debugPrint('🚫 중복 dedupeKey=$key → 무시');
       return false;
     }
 
@@ -222,91 +376,142 @@ class FcmService {
     final mailJson = data['mailData'];
     if (mailJson == null) return;
 
-    final mail = Email.fromJsonString(mailJson);
-    _onNewEmailCallback?.call(mail);
-    debugPrint('📬 onNewEmail callback: ${mail.subject} / ${mail.sender}');
+    var email = Email.fromJsonString(mailJson);
+
+    // 1) mailData 내부의 "메일 고유 ID" 우선
+    String? mailId;
+    try {
+      final m = jsonDecode(mailJson);
+      mailId = (m['message_id'] ?? m['messageId'])?.toString();
+    } catch (_) {}
+
+    // 2) 보강: ruleAlarm가 상위 data에 있다면 주입
+    final ra = (data['ruleAlarm'] as String?)?.trim();
+    if ((email.ruleAlarm == null || email.ruleAlarm!.isEmpty) && (ra?.isNotEmpty ?? false)) {
+      email = email.copyWith(ruleAlarm: ra);
+    }
+
+    // 3) Email.id는 메일 고유 ID 우선, 없으면 FCM ID로 폴백(최후의 수단)
+    final ensuredId = (mailId?.isNotEmpty == true)
+        ? mailId!
+        : (message.messageId ?? data['messageId'] ?? DateTime.now().millisecondsSinceEpoch.toString()).toString();
+
+    if (email.id != ensuredId) {
+      email = email.copyWith(id: ensuredId);
+    }
+
+    _emitEmail(email);
+  }
+
+
+  Future<void> _maybeSpeakOnceIfOneShot(Map<String, dynamic> data) async {
+    if (defaultTargetPlatform != TargetPlatform.iOS) return;
+
+    final rawUntil = data['criticalUntil'];
+    final criticalUntil = (rawUntil is bool && rawUntil) ||
+        (rawUntil is String && rawUntil.toLowerCase() == 'true');
+    final isCritical = data['isCritical'] == 'true';
+    if (!isCritical || criticalUntil) return;
+
+    final msgId = (data['messageId'] ?? '').toString();
+    if (await AlarmSettingsStore.isDuplicateTtsAndMark('tts_once_$msgId')) {
+      return;
+    }
+
+    String? subject, body;
+    try {
+      final mailMap =
+          data['mailData'] != null ? jsonDecode(data['mailData']) : {};
+      subject = (mailMap['subject'] ?? '').toString();
+      body = (mailMap['body'] ?? '').toString();
+    } catch (_) {}
+
+    final tts = _buildTtsForLocale(subject: subject, body: body);
+    final ttsText = tts['text']!, ttsLang = tts['lang']!;
+    await Future.delayed(const Duration(milliseconds: 800));
+    try {
+      const ttsChannel = MethodChannel('com.secure.mail_push_app/tts');
+      await ttsChannel.invokeMethod('speak', {'text': ttsText, 'lang': ttsLang});
+    } catch (_) {}
   }
 
   Future<void> _showNotification(RemoteMessage msg) async {
-    debugPrint('🔔 _showNotification 진입');
-
     final data = msg.data;
-    final mailMap = data['mailData'] != null ? jsonDecode(data['mailData']) : null;
+    final mailMap =
+        data['mailData'] != null ? jsonDecode(data['mailData']) : null;
     final subject = mailMap?['subject'] ?? msg.notification?.title ?? '새 이메일';
     final sender = mailMap?['sender'] ?? data['sender'] ?? 'Unknown Sender';
 
     final serverCritical = data['isCritical'] == 'true';
     final allowCritical = await AlarmSettingsStore.getCriticalOn();
     final effectiveCritical = serverCritical && allowCritical;
-    final criticalUntil = (data['criticalUntil']?.toString().toLowerCase() == 'true');
-
-    debugPrint('🔎 flags: serverCritical=$serverCritical, allowCritical=$allowCritical, '
-        'effective=$effectiveCritical, until=$criticalUntil');
 
     final androidDetails = AndroidNotificationDetails(
       effectiveCritical ? _chCriticalId : _chGeneralId,
       effectiveCritical ? _chCriticalName : _chGeneralName,
-      importance: effectiveCritical ? Importance.max : Importance.defaultImportance,
+      importance: effectiveCritical
+          ? Importance.max
+          : Importance.defaultImportance,
       priority: effectiveCritical ? Priority.high : Priority.defaultPriority,
       playSound: effectiveCritical,
     );
 
-    // iOS는 알림 사운드는 APNs가 담당(once일 때만). 여기서는 소리 끔.
-    const iosDetails = DarwinNotificationDetails(presentSound: false);
-    final nd = NotificationDetails(android: androidDetails, iOS: iosDetails);
-
-    final id = (data['messageId'] ?? msg.messageId ?? '').hashCode;
-    await _notificationsPlugin.show(
-      id,
-      subject,
-      'From: $sender',
-      nd,
-      payload: jsonEncode(data),
+    final iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
     );
-    debugPrint('🧾 로컬 알림 표시 (id=$id)');
 
+    final nd = NotificationDetails(android: androidDetails, iOS: iosDetails);
+    final channel = (data['pushChannel'] ?? 'alert').toString();
+
+    if (Platform.isIOS && channel == 'alert') {
+      debugPrint('📵 iOS: APNs alert 감지 → 로컬 배너 스킵');
+    } else {
+      final localId = (data['messageId'] ?? msg.messageId ?? '').hashCode;
+      await _notificationsPlugin.show(
+        localId,
+        subject,
+        'From: $sender',
+        nd,
+        payload: jsonEncode(data),
+      );
+    }
+
+    await _maybeSpeakOnceIfOneShot(data);
     await _startLoopIfNeeded(data);
   }
 
   Future<void> _startLoopIfNeeded(Map<String, dynamic> data) async {
-    if (_AlarmLoopState.running) {
-      debugPrint('🚫 loop already running (skip)');
-      return;
-    }
-    final rawUntil = data['criticalUntil'];
-    final criticalUntil = (rawUntil is bool && rawUntil == true) ||
-        (rawUntil is String && rawUntil.toLowerCase() == 'true');
+    if (_AlarmLoopState.running) return;
 
+    final rawUntil = data['criticalUntil'];
+    final criticalUntil = (rawUntil is bool && rawUntil) ||
+        (rawUntil is String && rawUntil.toLowerCase() == 'true');
     final serverCritical = data['isCritical'] == 'true';
     final allowCritical = await AlarmSettingsStore.getCriticalOn();
     final effectiveCritical = serverCritical && allowCritical;
-
-    debugPrint('🧪 loop check: serverCritical=$serverCritical, allowCritical=$allowCritical, criticalUntil=$criticalUntil');
-
-    // 🔑 하이브리드 핵심:
-    // loop(criticalUntil=true)일 때만 로컬 사이렌/tts 시작.
-    if (!effectiveCritical || !criticalUntil) {
-      debugPrint('🧪 loop skip: effectiveCritical=$effectiveCritical, criticalUntil=$criticalUntil');
-      return;
-    }
+    if (!effectiveCritical || !criticalUntil) return;
 
     String? subject, body;
     try {
-      final mailMap = data['mailData'] != null ? jsonDecode(data['mailData']) : {};
+      final mailMap =
+          data['mailData'] != null ? jsonDecode(data['mailData']) : {};
       subject = (mailMap['subject'] ?? '').toString();
       body = (mailMap['body'] ?? '').toString();
     } catch (_) {}
 
     final tts = _buildTtsForLocale(subject: subject, body: body);
-    final ttsText = tts['text']!;
-    final ttsLang = tts['lang']!;
+    final ttsText = tts['text']!, ttsLang = tts['lang']!;
 
     try {
-      const mode = 'loop';
-      debugPrint('🧪 invoking alarm_loop.start… text="$ttsText", lang=$ttsLang, mode=$mode');
-      await _alarmLoopChannel.invokeMethod('start', {'text': ttsText, 'lang': ttsLang, 'mode': mode});
+      await _alarmLoopChannel.invokeMethod(
+        'start',
+        {'text': ttsText, 'lang': ttsLang, 'mode': 'loop'},
+      );
       _AlarmLoopState.running = true;
-      debugPrint('🚨 alarm loop started ($ttsLang): $ttsText (mode=$mode)');
+      loopRunning.value = true;
+      debugPrint('✅ Alarm loop started');
     } catch (e) {
       debugPrint('❌ alarm loop start failed: $e');
     }
@@ -316,62 +521,103 @@ class FcmService {
     if (!_AlarmLoopState.running) return;
     try {
       await _alarmLoopChannel.invokeMethod('stop');
-      debugPrint('🛑 alarm loop stopped');
-    } catch (e) {
-      debugPrint('❌ alarm loop stop failed: $e');
-    }
+    } catch (_) {}
     _AlarmLoopState.running = false;
+    loopRunning.value = false;
+    debugPrint('✅ Alarm loop stopped');
   }
 
-  Future<void> stopAlarmByUser() async {
-    await _stopLoop();
+  Future<bool> isAlarmLoopRunning() async {
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        final res = await _alarmLoopChannel.invokeMethod('status');
+        if (res is bool) {
+          _AlarmLoopState.running = res;
+          loopRunning.value = res;
+          return res;
+        }
+      } catch (_) {}
+    }
+    return _AlarmLoopState.running;
   }
+
+  Future<void> stopAlarmByUser() async => _stopLoop();
 
   void _navigateToDetail(RemoteMessage message) {
     final data = message.data;
-    final mailMap = data['mailData'] != null ? jsonDecode(data['mailData']) : <String, dynamic>{};
+    final mailMap = data['mailData'] != null
+        ? jsonDecode(data['mailData'])
+        : <String, dynamic>{};
+
     final email = Email(
-      id: data['messageId']?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
-      emailAddress: mailMap['email_address'] ?? '',
-      subject: mailMap['subject'] ?? data['subject'] ?? '',
-      sender: mailMap['sender'] ?? data['sender'] ?? 'Unknown Sender',
-      body: mailMap['body'] ?? data['body'] ?? '',
+      id: (data['messageId'] ??
+              message.messageId ??
+              DateTime.now().millisecondsSinceEpoch.toString())
+          .toString(),
+      emailAddress: (mailMap['email_address'] ?? '').toString(),
+      subject: (mailMap['subject'] ?? data['subject'] ?? '').toString(),
+      sender: (mailMap['sender'] ?? data['sender'] ?? 'Unknown Sender')
+          .toString(),
+      body: (mailMap['body'] ?? data['body'] ?? '').toString(),
       receivedAt: mailMap['received_at'] != null
           ? DateTime.parse(mailMap['received_at'])
           : DateTime.now(),
       read: false,
+      ruleAlarm: (data['ruleAlarm'] as String?)?.trim(),
     );
     NavigationService.instance.navigateTo('/mail_detail', arguments: email);
-    debugPrint('🔔 디테일 페이지로 이동: ${email.id}');
   }
 
   void _navigateToDetailFromPayload(String payload) {
     final data = jsonDecode(payload);
-    final mailMap = data['mailData'] != null ? jsonDecode(data['mailData']) : <String, dynamic>{};
+    final mailMap = data['mailData'] != null
+        ? jsonDecode(data['mailData'])
+        : <String, dynamic>{};
+
     final email = Email(
-      id: data['messageId']?.hashCode ?? DateTime.now().millisecondsSinceEpoch,
-      subject: mailMap['subject'] ?? data['subject'] ?? '',
-      sender: mailMap['sender'] ?? data['sender'] ?? 'Unknown Sender',
-      body: mailMap['body'] ?? data['body'] ?? '',
-      emailAddress: mailMap['email_address'] ?? '',
+      id: (data['messageId'] ??
+              DateTime.now().millisecondsSinceEpoch.toString())
+          .toString(),
+      subject: (mailMap['subject'] ?? data['subject'] ?? '').toString(),
+      sender: (mailMap['sender'] ?? data['sender'] ?? 'Unknown Sender')
+          .toString(),
+      body: (mailMap['body'] ?? data['body'] ?? '').toString(),
+      emailAddress: (mailMap['email_address'] ?? '').toString(),
       receivedAt: mailMap['received_at'] != null
           ? DateTime.parse(mailMap['received_at'])
           : DateTime.now(),
       read: false,
+      ruleAlarm: (data['ruleAlarm'] as String?)?.trim(),
     );
     NavigationService.instance.navigateTo('/mail_detail', arguments: email);
-    debugPrint('🔔 페이로드에서 디테일 페이지로 이동: ${email.id}');
   }
 }
 
+// Android BG isolate (iOS는 네이티브/OS가 배너 처리)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  if (defaultTargetPlatform == TargetPlatform.iOS) {
+    final d = message.data;
+    final isCritical = d['isCritical'] == 'true';
+    final until =
+        (d['criticalUntil']?.toString().toLowerCase() == 'true');
+    if (isCritical && until) {
+      debugPrint('🔕 iOS until=TRUE BG: hand off to native; Dart BG no-op');
+      return;
+    }
+  }
+
   debugPrint('🔔 백그라운드 알림 수신(data): ${message.data}');
   final data = message.data;
   if (data['ruleMatched'] != 'true') return;
-  final mid = (data['messageId'] ?? message.messageId ?? '').toString();
-  if (mid.isEmpty) return;
-  final dup = await AlarmSettingsStore.isDuplicateAndMark(mid);
-  if (dup) return;
+
+  final key = _dedupeKeyFromData(data, message.messageId);
+  if (key.isEmpty) return;
+
+  final dup = await AlarmSettingsStore.isDuplicateAndMark(key);
+  if (dup) {
+    debugPrint('🚫 Duplicate detected in BG: $key');
+    return;
+  }
 
   final serverCritical = data['isCritical'] == 'true';
   final allowCritical = await AlarmSettingsStore.getCriticalOn();
@@ -388,18 +634,15 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     importance: effectiveCritical ? Importance.max : Importance.high,
     playSound: effectiveCritical,
   );
-  const iosDetails = DarwinNotificationDetails(presentSound: false);
+  const iosDetails =
+      DarwinNotificationDetails(presentAlert: true, presentSound: true);
   final nd = NotificationDetails(android: androidDetails, iOS: iosDetails);
 
   await plugin.show(
-    mid.hashCode,
+    key.hashCode,
     subject,
     'From: $sender',
     nd,
     payload: jsonEncode(data),
   );
-  debugPrint('🔔 백그라운드 알림 표시 (critical=$effectiveCritical)');
-
-  // 🔑 loop일 때만 로컬 사이렌/tts 실행
-  await FcmService()._startLoopIfNeeded(data);
 }

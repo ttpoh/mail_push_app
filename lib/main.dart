@@ -252,7 +252,7 @@ class _MyAppState extends State<MyApp> {
             ),
         '/mail_detail': (context) {
           final email = ModalRoute.of(context)!.settings.arguments as Email;
-          return MailDetailPage(email: email);
+          return MailDetailPage(email: email, fcm: widget.fcmService);
         },
       },
     );

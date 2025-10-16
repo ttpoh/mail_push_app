@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:mail_push_app/l10n/app_localizations.dart';
 import 'package:mail_push_app/ui_kit/constant/event_color.dart' as ec;
 import 'package:mail_push_app/device/alarm_setting_sync.dart';
+import 'package:mail_push_app/fcm/fcm_service.dart'; // ⬅︎ loopRunning 구독용
 
+typedef VoidAsync = FutureOr<void> Function();
 typedef BoolSetter = void Function(bool);
 
 Future<void> showAlarmSettingsDialogWithServerDefaults({
@@ -16,6 +18,8 @@ Future<void> showAlarmSettingsDialogWithServerDefaults({
   required BoolSetter onCriticalChanged,
   required BoolSetter onCriticalUntilChanged,
   required VoidCallback onOpenAppNotificationSettings,
+  required VoidAsync onStopAlarm, // ⬅︎ 그대로 사용
+
 }) async {
   final server = await sync.loadFromServerAndSeedPrefs(alsoSeedPrefs: true);
 
@@ -33,6 +37,7 @@ Future<void> showAlarmSettingsDialogWithServerDefaults({
     onCriticalChanged: onCriticalChanged,
     onCriticalUntilChanged: onCriticalUntilChanged,
     onOpenAppNotificationSettings: onOpenAppNotificationSettings,
+    onStopAlarm: onStopAlarm,
   );
 }
 
@@ -79,6 +84,8 @@ Future<void> showAlarmSettingsDialog({
   required BoolSetter onCriticalChanged,
   required BoolSetter onCriticalUntilChanged,
   required VoidCallback onOpenAppNotificationSettings,
+  required VoidCallback onStopAlarm,
+
 }) async {
   final t = AppLocalizations.of(context)!;
 
@@ -231,6 +238,23 @@ Future<void> showAlarmSettingsDialog({
                 ),
               ),
               actions: [
+                // ⬇︎ 루프 실행 중일 때만 노출
+                ValueListenableBuilder<bool>(
+                  valueListenable: FcmService.loopRunning,
+                  builder: (context, running, _) {
+                    if (!running) return const SizedBox.shrink();
+                    return TextButton.icon(
+                      icon: const Icon(Icons.alarm_off_rounded),
+                      label: Text(t.stopEmergencyAlarm), // 없으면 '알람 중지'로 직접 문자열 사용
+                      onPressed: () async {
+                        await saver.flush();   // 대기중인 플래그 패치가 있으면 먼저 반영
+                        await Future.sync(onStopAlarm); // ← 동기/비동기 모두 안전하게 await
+                        // 필요하면 다이얼로그 유지/닫기 선택:
+                        // Navigator.pop(context); // 중지 후 다이얼로그 닫고 싶다면 주석 해제
+                      },
+                    );
+                  },
+                ),
                 TextButton(
                   onPressed: () async { await saver.flush(); Navigator.pop(ctx); },
                   child: Text(t.close, style: const TextStyle(color: Colors.black)),

@@ -6,7 +6,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mail_push_app/l10n/app_localizations.dart';
 import 'package:mail_push_app/ui_kit/constant/event_color.dart' as ec;
 
-// ▼ 공통 카드
 class AppCard extends StatelessWidget {
   final Widget child;
   const AppCard({super.key, required this.child});
@@ -115,6 +114,35 @@ class _RuleListPageState extends State<RuleListPage> {
     setState(() => _rules.removeAt(index));
   }
 
+  Widget _alarmChip(BuildContext ctx, AlarmLevel level) {
+    final t = AppLocalizations.of(ctx)!;
+    late final Color color;
+    late final String label;
+    switch (level) {
+      case AlarmLevel.normal:
+        color = Colors.green;
+        label = t.generalAlarmLabel; // "일반 알람"
+        break;
+      case AlarmLevel.critical:
+        color = Colors.orange;
+        label = t.criticalAlarmLabel; // "주의 알람"
+        break;
+      case AlarmLevel.until:
+        color = Colors.red;
+        label = t.ringUntilStopped; // "정지 시까지"
+        break;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        border: Border.all(color: color),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
+    );
+  }
+
   Widget _buildRuleTile(BuildContext context, int idx) {
     final t = AppLocalizations.of(context)!;
     final rule = _rules[idx];
@@ -137,11 +165,21 @@ class _RuleListPageState extends State<RuleListPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(rule.name,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: Colors.black,
-                              fontWeight: FontWeight.w700,
-                            )),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            rule.name,
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _alarmChip(context, rule.alarm), // ✅ 알람 모드 칩
+                      ],
+                    ),
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
@@ -155,11 +193,7 @@ class _RuleListPageState extends State<RuleListPage> {
                 ),
               ),
               const SizedBox(width: 8),
-              if (rule.stopFurtherRules)
-                const Padding(
-                  padding: EdgeInsets.only(right: 4),
-                  child: Icon(Icons.block, size: 18, color: Colors.redAccent),
-                ),
+              // stopFurtherRules 관련 UI 제거
               PopupMenuButton<String>(
                 color: Colors.white,
                 iconColor: ec.eventLightUnselectedItemColor,

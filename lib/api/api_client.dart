@@ -10,18 +10,15 @@ class ApiClient {
   static final _baseUrl = dotenv.env['SERVER_BASE_URL']!;
 
   /// 디바이스/알람 설정 UPSERT
-  /// - deviceId 필수
-  /// - platform/fcmToken/emailAddress/flags 는 옵션 (null이면 서버에서 기존값 유지)
-  /// - overwrite: 서버 라우트가 받지는 않지만, 상위 모듈 호환을 위해 시그니처만 유지
   Future<bool> upsertAlarmSetting({
     required String deviceId,
-    String? platform, // 'ios' | 'android' | ''(미변경)
+    String? platform,
     String? fcmToken,
     String? emailAddress,
     bool? normalOn,
     bool? criticalOn,
     bool? criticalUntilStopped,
-    bool overwrite = false, // ← 라우트에 전달하지 않음(호환성 유지용)
+    bool overwrite = false, // 서버에 보내지 않음(호환용)
   }) async {
     try {
       final body = <String, dynamic>{
@@ -32,7 +29,6 @@ class ApiClient {
         if (normalOn != null) 'normal_on': normalOn,
         if (criticalOn != null) 'critical_on': criticalOn,
         if (criticalUntilStopped != null) 'critical_until_stopped': criticalUntilStopped,
-        // 'overwrite'는 서버가 받지 않으므로 전송하지 않습니다.
       };
 
       final resp = await http.post(
@@ -50,8 +46,6 @@ class ApiClient {
   }
 
   /// 디바이스/알람 설정 조회
-  /// - 성공 시 서버의 JSON(Map)을 그대로 반환 (예: {found:true, normal_on:..., ...})
-  /// - 레코드 없음/에러 시 null 반환
   Future<Map<String, dynamic>?> getAlarmSetting({
     required String deviceId,
   }) async {
@@ -75,7 +69,7 @@ class ApiClient {
     }
   }
 
-  // 토큰 검증 (서버에 /validate_token 이 있을 때만 유효)
+  // 토큰 검증
   Future<bool> validateToken(String accessToken, String service) async {
     try {
       final response = await http.post(
@@ -83,7 +77,7 @@ class ApiClient {
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'access_token': accessToken,
-          'service': service, // 'gmail' | 'outlook' | 'icloud'
+          'service': service,
         }),
       );
       if (response.statusCode == 200) {
@@ -97,23 +91,21 @@ class ApiClient {
     }
   }
 
-  /// FCM/액세스토큰/리프레시토큰 등록 (서비스별 부가 필드 포함)
+  /// FCM/액세스토큰/리프레시토큰 등록
   Future<bool> registerTokens({
     required String fcmToken,
     required String accessToken,
     required String? refreshToken,
     required String service,
-    String? emailAddress, // Gmail용 이메일 주소
+    String? emailAddress, // Gmail용
   }) async {
     final storage = const FlutterSecureStorage();
 
-    // Outlook용 clientState
     String? clientState;
     if (service == 'outlook') {
       clientState = await storage.read(key: 'outlook_client_state');
     }
 
-    // Gmail 이메일 주소
     String? email;
     if (service == 'gmail') {
       email = emailAddress ?? await storage.read(key: 'gmail_user_email');
@@ -123,7 +115,6 @@ class ApiClient {
       }
     }
 
-    // iCloud용 sub (고유 식별)
     String? sub;
     if (service == 'icloud') {
       sub = await storage.read(key: 'icloud_sub');
@@ -159,11 +150,12 @@ class ApiClient {
   }
 
   /// 메일 목록 조회
+  /// - 서버가 alarm, message_id를 반환하면 Email 모델에 매핑되도록 전처리
   Future<List<Email>> fetchEmails(
     String service,
     String emailAddress, {
-    String? since, // ISO8601 문자열. 이후 메일만 가져오기 위해 사용
-    int? limit, // 최대 가져올 개수
+    String? since,
+    int? limit,
   }) async {
     try {
       final queryParams = <String, String>{
@@ -181,9 +173,17 @@ class ApiClient {
 
       if (response.statusCode == 200) {
         final List<dynamic> jsonList = jsonDecode(response.body);
-        return jsonList
-            .map((json) => Email.fromJson(json as Map<String, dynamic>))
-            .toList();
+        return jsonList.map((raw) {
+          final m = Map<String, dynamic>.from(raw as Map);
+          // 서버가 message_id를 내려주면 → Email.fromJson에서 기대하는 키로 맞춤
+          m['messageId'] = m['messageId'] ?? m['message_id'] ?? m['id']?.toString();
+          // 서버가 alarm을 내려주면 → ruleAlarm으로 맞춤
+          if (m['alarm'] != null && (m['ruleAlarm'] == null)) {
+            m['ruleAlarm'] = m['alarm'];
+          }
+          // received_at 문자열 보정(있으면 그대로)
+          return Email.fromJson(m);
+        }).toList();
       } else {
         throw Exception(
             'Failed to load emails: ${response.statusCode} ${response.body}');
@@ -191,6 +191,36 @@ class ApiClient {
     } catch (e) {
       debugPrint('❌ fetchEmails 오류: $e');
       rethrow;
+    }
+  }
+
+  /// 메일 읽음 표시
+  /// - 서버의 /api/emails/mark-read 사용
+  Future<bool> markEmailRead({
+    required String service,
+    required String emailAddress,
+    required String messageId, // ✅ 항상 원본 messageId 사용
+    required bool read,
+  }) async {
+    try {
+      final uri = Uri.parse('$_baseUrl/api/emails/mark-read');
+      final body = json.encode({
+        'service': service,
+        'email_address': emailAddress,
+        'message_id': messageId, // ✅ 표준화
+        'read': read,
+      });
+      final resp = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      );
+
+      debugPrint('📮 markEmailRead resp: ${resp.statusCode} ${resp.body}');
+      return resp.statusCode == 200;
+    } catch (e) {
+      debugPrint('❌ markEmailRead error: $e');
+      return false;
     }
   }
 }

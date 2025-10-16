@@ -6,7 +6,7 @@
   "menuLogout": "로그아웃",
   "waitingNewEmails": "새 이메일 수신 대기 중...",
   "settingsOpenError": "설정 화면을 열 수 없습니다.",
-  "alarmSettingsTitle": "알림 설정",
+  "alarmSettingsTitle": "알람 설정",
   "generalAlarmLabel": "일반 알람",
   "generalAlarmSubtitle": "무음/방해금지 모드를 우회하지 않음",
   "criticalAlarmLabel": "긴급 알람 (무음 모드 허용)",
@@ -69,7 +69,15 @@
   "@criticalMustBeOnForUntilStopped": {
     "description": "사용자가 critical_off 상태에서 '정지 시까지'를 켰을 때 안내"
   },
-
+  "stopEmergencyAlarm": "긴급 알람 중지",
+  "@stopEmergencyAlarm": {
+    "description": "알람 끌 때까지 모드를 중지하는 버튼 레이블"
+  },
+  "keywordLogicLabel": "키워드 로직",
+  "logicAnd": "AND (모두 일치)",
+  "logicOr": "OR (하나 이상 일치)",
+  "needLogicForConditions": "각 조건의 키워드 로직(AND / OR)을 선택하세요.",
+  
   "loginTitle": "로그인",
   "langKorean": "한국어",
   "langEnglish": "English",

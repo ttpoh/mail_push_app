@@ -69,8 +69,15 @@
   "@criticalMustBeOnForUntilStopped": {
     "description": "ユーザーがcritical_offのまま『停止するまで』を有効化した時の案内"
   },
-
-
+  "stopEmergencyAlarm": "緊急アラームを停止",
+  "@stopEmergencyAlarm": {
+    "description": "クリティカルアラーム（止めるまで）を停止するボタンのラベル"
+  },
+  "keywordLogicLabel": "キーワードロジック",
+  "logicAnd": "AND（すべて一致）",
+  "logicOr": "OR（いずれか一致）",
+  "needLogicForConditions": "各条件のキーワードロジック（AND / OR）を選択してください。",
+  
   "loginTitle": "ログイン",
   "langKorean": "한국어",
   "langEnglish": "English",

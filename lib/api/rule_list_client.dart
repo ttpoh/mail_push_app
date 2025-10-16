@@ -46,7 +46,7 @@ class RulesApi {
       if (authToken != null) 'Authorization': 'Bearer $authToken',
     };
     final body = {
-      ...rule.toJson(),
+      ...rule.toJson(),                 // alarm 포함
       if (fcmToken != null) 'fcm_token': fcmToken,
     };
     final resp = await http.post(uri, headers: headers, body: jsonEncode(body));
@@ -67,7 +67,7 @@ class RulesApi {
       if (authToken != null) 'Authorization': 'Bearer $authToken',
     };
     final body = {
-      ...rule.toJson(),
+      ...rule.toJson(),                 // alarm 포함
       if (fcmToken != null) 'fcm_token': fcmToken,
     };
     final resp = await http.put(uri, headers: headers, body: jsonEncode(body));
@@ -89,5 +89,4 @@ class RulesApi {
       throw Exception('deleteRule failed ${resp.statusCode}: ${resp.body}');
     }
   }
-
 }

@@ -27,7 +27,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get settingsOpenError => '설정 화면을 열 수 없습니다.';
 
   @override
-  String get alarmSettingsTitle => '알림 설정';
+  String get alarmSettingsTitle => '알람 설정';
 
   @override
   String get generalAlarmLabel => '일반 알람';
@@ -192,6 +192,21 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get criticalMustBeOnForUntilStopped => '정지 시까지 울림을 사용하려면 긴급 알림을 켜야 합니다.';
+
+  @override
+  String get stopEmergencyAlarm => '긴급 알람 중지';
+
+  @override
+  String get keywordLogicLabel => '키워드 로직';
+
+  @override
+  String get logicAnd => 'AND (모두 일치)';
+
+  @override
+  String get logicOr => 'OR (하나 이상 일치)';
+
+  @override
+  String get needLogicForConditions => '각 조건의 키워드 로직(AND / OR)을 선택하세요.';
 
   @override
   String get loginTitle => '로그인';
