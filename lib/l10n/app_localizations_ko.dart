@@ -185,6 +185,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get needKeywordsInAllConditions => '모든 조건에 키워드를 넣어야 합니다.';
 
   @override
+  String get keywordInputHelper => '쉼표(,)·세미콜론(;)·줄바꿈으로 여러 개 입력할 수 있어요.';
+
+  @override
   String get ruleSaveFailed => '규칙 저장에 실패했습니다. 다시 시도해주세요.';
 
   @override
@@ -207,6 +210,21 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get needLogicForConditions => '각 조건의 키워드 로직(AND / OR)을 선택하세요.';
+
+  @override
+  String get enterSoundOrTts => '사운드 또는 TTS 메시지를 하나 이상 설정해 주세요.';
+
+  @override
+  String get soundLabel => '사운드';
+
+  @override
+  String get selectSoundHint => '사운드를 선택하세요';
+
+  @override
+  String get ttsMessageLabel => 'TTS 메시지';
+
+  @override
+  String get ttsMessageHint => '예: 긴급 메일이 도착했습니다.';
 
   @override
   String get loginTitle => '로그인';

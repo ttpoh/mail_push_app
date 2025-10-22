@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mail_push_app/api/rule_list_client.dart';
-import 'package:mail_push_app/menu/rule_options.dart';
+import 'package:mail_push_app/menu/rule_options/rule_options_page.dart';
 import 'package:mail_push_app/models/rule_model.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mail_push_app/l10n/app_localizations.dart';
@@ -41,6 +41,9 @@ class _RuleListPageState extends State<RuleListPage> {
   bool _loading = true;
   String? _error;
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+
+  // ✅ 규칙 on/off 저장 중인 인덱스 (칩에 로딩 UI 표시)
+  int? _busyEnabledIndex;
 
   @override
   void initState() {
@@ -114,32 +117,133 @@ class _RuleListPageState extends State<RuleListPage> {
     setState(() => _rules.removeAt(index));
   }
 
-  Widget _alarmChip(BuildContext ctx, AlarmLevel level) {
-    final t = AppLocalizations.of(ctx)!;
-    late final Color color;
-    late final String label;
-    switch (level) {
-      case AlarmLevel.normal:
-        color = Colors.green;
-        label = t.generalAlarmLabel; // "일반 알람"
-        break;
-      case AlarmLevel.critical:
-        color = Colors.orange;
-        label = t.criticalAlarmLabel; // "주의 알람"
-        break;
-      case AlarmLevel.until:
-        color = Colors.red;
-        label = t.ringUntilStopped; // "정지 시까지"
-        break;
+  // ✅ ON/OFF 토글
+  Future<void> _toggleRuleEnabled(int index) async {
+    if (_busyEnabledIndex == index) return;
+    final t = AppLocalizations.of(context)!;
+
+    final prev = _rules[index];
+    final toggled = prev.copyWith(enabled: !prev.enabled);
+
+    setState(() {
+      _busyEnabledIndex = index;
+      _rules[index] = toggled; // 낙관적 업데이트
+    });
+
+    try {
+      final fcm = await _secureStorage.read(key: 'fcm_token');
+      await _api.updateRule(toggled, fcmToken: fcm);
+      // 성공 시 유지
+    } catch (e) {
+      // 실패 시 롤백
+      setState(() => _rules[index] = prev);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(t.ruleUpdateFailed('$e'))));
+      }
+    } finally {
+      if (mounted) setState(() => _busyEnabledIndex = null);
     }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+  }
+
+  // 🔹 알람 라벨/색상 매핑
+  String _alarmLabel(AppLocalizations t, AlarmLevel a) {
+    switch (a) {
+      case AlarmLevel.normal:
+        return t.generalAlarmLabel;      // 예: "일반 알림"
+      case AlarmLevel.critical:
+        return t.ringOnce;               // 예: "1회 울림"
+      case AlarmLevel.until:
+        return t.ringUntilStopped;       // 예: "멈출 때까지"
+    }
+  }
+
+  Color _alarmColor(AlarmLevel a) {
+    switch (a) {
+      case AlarmLevel.normal:
+        return Colors.green;
+      case AlarmLevel.critical:
+        return Colors.orange;
+      case AlarmLevel.until:
+        return Colors.red;
+    }
+  }
+
+  // ✅ ON/OFF 칩 (탭 가능 + 로딩 표시) + (ON일 때) 아래에 알람 유형을 작게 표시
+  Widget _enabledChip(
+    BuildContext ctx, {
+    required bool enabled,
+    required VoidCallback? onTap,
+    required bool processing,
+    String? subtitleWhenOn,
+    Color? subtitleColor,
+  }) {
+    final Color color = enabled ? Colors.green : Colors.grey;
+    final String label = enabled ? 'ON' : 'OFF'; // 간단/명확. 필요 시 로컬라이즈 가능.
+
+    final chipChild = processing
+        ? SizedBox(
+            width: 14, height: 14,
+            child: CircularProgressIndicator(strokeWidth: 2, color: color),
+          )
+        : Text(
+            label,
+            style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12),
+          );
+
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: color.withOpacity(0.08),
         border: Border.all(color: color),
         borderRadius: BorderRadius.circular(999),
       ),
-      child: Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
+      child: chipChild,
+    );
+
+    // 칩 자체는 탭 가능, 아래 라벨은 정보용
+    final tappableChip = InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: (processing || onTap == null) ? null : onTap,
+      child: chip,
+    );
+
+    // ON일 때만 하단 라벨 표시
+    final subtitle = (enabled && subtitleWhenOn != null && subtitleWhenOn.isNotEmpty)
+        ? Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 작은 상태 점
+                Container(
+                  width: 6, height: 6,
+                  decoration: BoxDecoration(
+                    color: (subtitleColor ?? color),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  subtitleWhenOn,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: (subtitleColor ?? color),
+                  ),
+                ),
+              ],
+            ),
+          )
+        : const SizedBox.shrink();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end, // 칩 오른쪽 정렬 느낌 유지
+      children: [
+        tappableChip,
+        subtitle,
+      ],
     );
   }
 
@@ -151,65 +255,87 @@ class _RuleListPageState extends State<RuleListPage> {
             '${c.type.displayName}: ${c.keywords.isEmpty ? '(${t.none})' : c.keywords.join(", ")}')
         .join(' • ');
 
-    return Material(
-      color: Colors.white,
-      child: InkWell(
-        onTap: () => _openEdit(idx),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          child: Row(
-            children: [
-              Icon(Icons.rule, color: ec.eventDarkIconColor),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            rule.name,
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.w700,
-                                ),
+    final isBusy = _busyEnabledIndex == idx;
+
+    // 규칙이 꺼져 있으면 내용 전체를 살짝 흐리게
+    final tileOpacity = rule.enabled ? 1.0 : 0.45;
+
+    // 알람 표시 텍스트/색상
+    final alarmText = _alarmLabel(t, rule.alarm);
+    final alarmColor = _alarmColor(rule.alarm);
+
+    return Opacity(
+      opacity: tileOpacity,
+      child: Material(
+        color: Colors.white,
+        child: InkWell(
+          onTap: () => _openEdit(idx),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.rule, color: ec.eventDarkIconColor),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 제목
+                          Expanded(
+                            child: Text(
+                              rule.name,
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        _alarmChip(context, rule.alarm), // ✅ 알람 모드 칩
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: ec.eventLightSecondaryTextColor,
+                          const SizedBox(width: 8),
+                          // ✅ 규칙 ON/OFF 토글 칩 (+ ON이면 아래에 알람 유형 작은 라벨)
+                          _enabledChip(
+                            context,
+                            enabled: rule.enabled,
+                            onTap: () => _toggleRuleEnabled(idx),
+                            processing: isBusy,
+                            subtitleWhenOn: alarmText,
+                            subtitleColor: alarmColor,
                           ),
-                    ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: ec.eventLightSecondaryTextColor,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                PopupMenuButton<String>(
+                  color: Colors.white,
+                  iconColor: ec.eventLightUnselectedItemColor,
+                  onSelected: (v) {
+                    if (v == 'edit') {
+                      _openEdit(idx);
+                    } else if (v == 'delete') {
+                      _deleteRule(idx);
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(value: 'edit', child: Text(t.ruleEdit)),
+                    PopupMenuItem(value: 'delete', child: Text(t.ruleDelete)),
                   ],
                 ),
-              ),
-              const SizedBox(width: 8),
-              // stopFurtherRules 관련 UI 제거
-              PopupMenuButton<String>(
-                color: Colors.white,
-                iconColor: ec.eventLightUnselectedItemColor,
-                onSelected: (v) {
-                  if (v == 'edit') {
-                    _openEdit(idx);
-                  } else if (v == 'delete') {
-                    _deleteRule(idx);
-                  }
-                },
-                itemBuilder: (_) => [
-                  PopupMenuItem(value: 'edit', child: Text(t.ruleEdit)),
-                  PopupMenuItem(value: 'delete', child: Text(t.ruleDelete)),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

@@ -6,7 +6,6 @@ import UserNotifications
 import AVFoundation
 
 func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
-    // 1) mailData 파싱 (top-level 또는 custom_data)
     var mailId: String?
     if let mailDataStr = (userInfo["mailData"] as? String)
         ?? ((userInfo["custom_data"] as? [String: Any])?["mailData"] as? String),
@@ -15,28 +14,23 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
         mailId = (md["message_id"] as? String) ?? (md["messageId"] as? String)
     }
 
-    // 2) 폴백: APNs/FCM의 메시지ID
     let fcmId = (userInfo["gcm.message_id"] as? String)
         ?? (userInfo["messageId"] as? String)
         ?? (userInfo["message_id"] as? String)
 
-    // 3) ruleVersion
     let ver = (userInfo["ruleVersion"] as? String) ?? "v0"
-
-    // 4) 채널은 **키에서 제외** (bg/alert 모두 동일 키)
     let keyBase = (mailId?.isEmpty == false) ? mailId! : (fcmId ?? "")
     guard !keyBase.isEmpty else { return nil }
     return "\(keyBase):\(ver)"
 }
-
 
 @main
 @objc class AppDelegate: FlutterAppDelegate,
     MessagingDelegate,
     AVSpeechSynthesizerDelegate,
     AVAudioPlayerDelegate,
-    FlutterStreamHandler { // ✅ EventChannel 스트림 핸들러 추가
-
+    FlutterStreamHandler
+{
     var flutterViewController: FlutterViewController?
     let synthesizer = AVSpeechSynthesizer()
 
@@ -49,7 +43,6 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
     }
 
     var isTTSSpeaking = false
-    // 메모리 누적 방지: 시간 기반 윈도우 또는 크기 제한 추가
     private var processedMessageIds = NSCache<NSString, NSNumber>()
     private let maxCacheSize = 500
     private var cacheCount = 0
@@ -60,17 +53,26 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
     var currentTtsText: String?
     var ttsQueuedNextSiren = false
     var alternatingLoop = false
-
-    private var isInBackground: Bool { UIApplication.shared.applicationState != .active }
-
-    // ✅ EventChannel sink 보관
     private var mailEventSink: FlutterEventSink?
 
+    // [RULE_SOUND] 추가 – UNTIL/CRITICAL에서 사용할 사운드 이름 저장
+    var loopSoundName: String?
+
+    // [RULE_SOUND] 서버에서 내려준 sound 추출
+    private func pickSoundName(from userInfo: [AnyHashable: Any]) -> String? {
+        if let s = userInfo["sound"] as? String { return s }
+        if let cd = userInfo["custom_data"] as? [String: Any],
+           let s = cd["sound"] as? String { return s }
+        return nil
+    }
+
+        // MARK: - App lifecycle & channels
     override func application(
         _ application: UIApplication,
-        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
     ) -> Bool {
 
+        // FlutterVC 회수
         if let nav = window?.rootViewController as? UINavigationController,
            let flutterVC = nav.children.first as? FlutterViewController {
             flutterViewController = flutterVC
@@ -87,7 +89,7 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
 
         UNUserNotificationCenter.current().requestAuthorization(
             options: [.alert, .sound, .badge, .criticalAlert]
-        ) { _,_ in }
+        ) { _, _ in }
         application.registerForRemoteNotifications()
 
         NotificationCenter.default.addObserver(
@@ -95,6 +97,7 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
             name: AVAudioSession.interruptionNotification, object: nil
         )
 
+        // TTS 채널
         let ttsChannel = FlutterMethodChannel(
             name: "com.secure.mail_push_app/tts",
             binaryMessenger: flutterViewController!.binaryMessenger
@@ -107,9 +110,12 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
                 let lang = args["lang"] as? String
                 self.speak(text, lang: lang)
                 result(nil)
-            } else { result(FlutterMethodNotImplemented) }
+            } else {
+                result(FlutterMethodNotImplemented)
+            }
         }
 
+        // Loop 채널
         let alarmLoopChannel = FlutterMethodChannel(
             name: "com.secure.mail_push_app/alarm_loop",
             binaryMessenger: flutterViewController!.binaryMessenger
@@ -133,6 +139,7 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
             }
         }
 
+        // Sync 채널
         let syncChannel = FlutterMethodChannel(
             name: "com.secure.mail_push_app/sync",
             binaryMessenger: flutterViewController!.binaryMessenger
@@ -144,10 +151,12 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
                let id = args["id"] as? String {
                 self.markProcessed(id)
                 result(nil)
-            } else { result(FlutterMethodNotImplemented) }
+            } else {
+                result(FlutterMethodNotImplemented)
+            }
         }
 
-        // ✅ EventChannel 등록 (Dart의 HomeScreen에서 이미 구독함)
+        // EventChannel (메일 이벤트 → Dart)
         let mailEventChannel = FlutterEventChannel(
             name: "com.secure.mail_push_app/mail_event",
             binaryMessenger: flutterViewController!.binaryMessenger
@@ -158,21 +167,9 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 
-    private func markProcessed(_ key: String) {
-        processedMessageIds.setObject(NSNumber(value: true), forKey: key as NSString)
-        cacheCount += 1
-        if cacheCount > maxCacheSize {
-            processedMessageIds.removeAllObjects()
-            cacheCount = 0
-        }
-    }
-
-    private func isAlreadyProcessed(_ key: String) -> Bool {
-        return processedMessageIds.object(forKey: key as NSString) != nil
-    }
-
+    // MARK: - FCM
     override func application(_ application: UIApplication,
-                            didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+                              didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Messaging.messaging().apnsToken = deviceToken
         super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
     }
@@ -182,56 +179,43 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
         print("🔔 FCM token: \(token)")
     }
 
-    @objc private func handleInterruption(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-        if type == .ended, !isTTSSpeaking, let text = currentTtsText, !isAlarmLoopRunning {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.speak(text, lang: self?.currentTtsLang)
+    // MARK: - Foreground banner
+    override func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        let userInfo = notification.request.content.userInfo
+
+        // dedupe
+        if let key = extractDedupeKey(userInfo) {
+            if isAlreadyProcessed(key) {
+                if #available(iOS 14.0, *) {
+                    completionHandler([.banner, .list, .badge, .sound])
+                } else {
+                    completionHandler([.alert, .badge, .sound])
+                }
+                return
             }
+            markProcessed(key)
+        }
+
+        // [RULE_SOUND] 규칙 사운드 저장
+        if let s = pickSoundName(from: userInfo), !s.isEmpty, s != "default" {
+            loopSoundName = s
+        }
+
+        // Dart로 이벤트 전달
+        emitMailEvent(from: userInfo)
+
+        if #available(iOS 14.0, *) {
+            completionHandler([.banner, .list, .badge, .sound])
+        } else {
+            completionHandler([.alert, .badge, .sound])
         }
     }
 
-    // ✅ Dart로 이벤트를 던지는 헬퍼
-    private func emitMailEvent(from userInfo: [AnyHashable: Any]) {
-        guard let sink = mailEventSink else { return }
-
-        // ruleMatched 체크
-        let rm1 = (userInfo["ruleMatched"] as? String)?.lowercased() == "true"
-        let rm2 = ((userInfo["custom_data"] as? [String: Any])?["ruleMatched"] as? String)?.lowercased() == "true"
-        guard rm1 || rm2 else { return }
-
-        // mailData 추출 (top-level 또는 custom_data 내부)
-        let mailDataStrTop = userInfo["mailData"] as? String
-        let mailDataStrNested = (userInfo["custom_data"] as? [String: Any])?["mailData"] as? String
-        guard let mailStr = mailDataStrTop ?? mailDataStrNested,
-              let mailData = mailStr.data(using: .utf8),
-              let mailMap = (try? JSONSerialization.jsonObject(with: mailData)) as? [String: Any] else {
-            return
-        }
-
-        // ✅ messageId: 메일 고유 ID 우선 → 서버 base_data의 messageId → 최후에 FCM ID
-        let mailIdFromData = (mailMap["message_id"] as? String) ?? (mailMap["messageId"] as? String)
-        let baseIdTop = userInfo["messageId"] as? String
-        let baseIdNested = (userInfo["custom_data"] as? [String: Any])?["messageId"] as? String
-        let baseId = baseIdTop ?? baseIdNested
-        let fcmId = (userInfo["gcm.message_id"] as? String)
-            ?? (userInfo["message_id"] as? String)
-
-        let mid = mailIdFromData ?? baseId ?? fcmId ?? UUID().uuidString
-
-        var payload: [String: Any] = [:]
-        payload["messageId"] = mid                     // ✅ 항상 메일 ID로 고정
-        payload["ruleMatched"] = "true"
-        if let ra = userInfo["ruleAlarm"] { payload["ruleAlarm"] = ra }
-        if let ea = userInfo["effectiveAlarm"] { payload["effectiveAlarm"] = ea }
-        if let ch = userInfo["pushChannel"] { payload["pushChannel"] = ch }
-        payload["mailData"] = mailMap
-
-        sink(payload)
-    }
-
+    // MARK: - Background/Remote push
     override func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable : Any],
@@ -241,8 +225,6 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
             completionHandler(.noData)
             return
         }
-
-        // 중복 체크
         if isAlreadyProcessed(key) {
             completionHandler(.noData)
             return
@@ -262,34 +244,44 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
         let ch = (userInfo["pushChannel"] as? String) ?? "alert"
         let (ttsText, ttsLang) = pickTTS(from: userInfo)
 
-        // ✅ Dart로 이벤트 전달 (ruleMatched && mailData 있을 때만)
+        // [RULE_SOUND] 규칙 사운드 저장 (CRITICAL/UNTIL 모두 사용)
+        if let s = pickSoundName(from: userInfo), !s.isEmpty, s != "default" {
+            loopSoundName = s
+        } else {
+            loopSoundName = nil
+        }
+
+        // Dart로 이벤트 전달
         emitMailEvent(from: userInfo)
 
-        // BG 작업 시간 연장
-        endBGTask()
+        // BG 작업 시간 확보 (critical일 때)
         if isCritical {
+            endBGTask()
             backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "TTS_Loop") { [weak self] in
                 self?.stopAlarmLoop()
                 self?.endBGTask()
             }
-            // 배경 작업 시간: 최대 30초 이용 가능하지만 조기 종료 방지
             DispatchQueue.main.asyncAfter(deadline: .now() + 28) { [weak self] in
                 guard let self = self else { return }
-                // TTS나 루프가 진행 중이면 조금 더 유지
                 if !self.isTTSSpeaking && !self.isAlarmLoopRunning {
                     self.endBGTask()
                 }
             }
         }
 
-        // (1) BG 채널 처리
+        // (1) BG 채널
         if ch == "bg" {
             if isCritical && criticalUntil {
+                // UNTIL 루프 시작 → 규칙 사운드 사용
                 startAlarmLoop(text: ttsText, lang: ttsLang, mode: "loop")
                 completionHandler(.newData)
                 return
             }
             if isCritical && !criticalUntil {
+                // CRITICAL 1회: 규칙 사운드 재생 + TTS 한번
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.playRuleSoundOnceOrDefault()
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                     self?.speak(ttsText, lang: ttsLang)
                 }
@@ -300,9 +292,10 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
             return
         }
 
-        // (2) ALERT 채널 Fail-over
+        // (2) ALERT 채널 (fail-over)
         if ch == "alert" {
             if isCritical && criticalUntil && !isAlarmLoopRunning {
+                // UNTIL: 루프 시작 (규칙 사운드 사용)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                     self?.startAlarmLoop(text: ttsText, lang: ttsLang, mode: "loop")
                 }
@@ -310,6 +303,10 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
                 return
             }
             if isCritical && !criticalUntil && !isTTSSpeaking {
+                // CRITICAL 1회: 규칙 사운드 재생 + TTS
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.playRuleSoundOnceOrDefault()
+                }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
                     self?.speak(ttsText, lang: ttsLang)
                 }
@@ -323,56 +320,158 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
         completionHandler(.noData)
     }
 
-    override func userNotificationCenter(
-        _ center: UNUserNotificationCenter,
-        willPresent notification: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        // ✅ 포그라운드 배너 케이스에서도 Dart로 즉시 전달
-        let userInfo = notification.request.content.userInfo
-
-            // ✅ dedupe: willPresent에서도 동일키로 중복 차단
-        if let key = extractDedupeKey(userInfo) {
-            if isAlreadyProcessed(key) {
-                // 이미 처리된 이벤트라면 Dart로 emit하지 않음
-                if #available(iOS 14.0, *) {
-                    completionHandler([ .banner, .list, .badge, .sound ])
-                } else {
-                    completionHandler([ .alert, .badge, .sound ])
-                }
-                return
+        // MARK: - Interruptions
+    @objc private func handleInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        if type == .ended, !isTTSSpeaking, let text = currentTtsText, !isAlarmLoopRunning {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.speak(text, lang: self?.currentTtsLang)
             }
-            markProcessed(key)
-        }
-
-        emitMailEvent(from: userInfo)
-
-        if #available(iOS 14.0, *) {
-            completionHandler([ .banner, .list, .badge, .sound ])
-        } else {
-            completionHandler([ .alert, .badge, .sound ])
         }
     }
 
-    // ===== 루프 =====
+    // MARK: - Event → Dart
+    private func emitMailEvent(from userInfo: [AnyHashable: Any]) {
+        guard let sink = mailEventSink else { return }
+        let rm1 = (userInfo["ruleMatched"] as? String)?.lowercased() == "true"
+        let rm2 = ((userInfo["custom_data"] as? [String: Any])?["ruleMatched"] as? String)?.lowercased() == "true"
+        guard rm1 || rm2 else { return }
+
+        let mailDataStrTop = userInfo["mailData"] as? String
+        let mailDataStrNested = (userInfo["custom_data"] as? [String: Any])?["mailData"] as? String
+        guard let mailStr = mailDataStrTop ?? mailDataStrNested,
+              let mailData = mailStr.data(using: .utf8),
+              let mailMap = (try? JSONSerialization.jsonObject(with: mailData)) as? [String: Any] else {
+            return
+        }
+
+        let mailIdFromData = (mailMap["message_id"] as? String) ?? (mailMap["messageId"] as? String)
+        let baseIdTop = userInfo["messageId"] as? String
+        let baseIdNested = (userInfo["custom_data"] as? [String: Any])?["messageId"] as? String
+        let baseId = baseIdTop ?? baseIdNested
+        let fcmId = (userInfo["gcm.message_id"] as? String)
+            ?? (userInfo["message_id"] as? String)
+
+        let mid = mailIdFromData ?? baseId ?? fcmId ?? UUID().uuidString
+
+        var payload: [String: Any] = [:]
+        payload["messageId"] = mid
+        payload["ruleMatched"] = "true"
+        if let ra = userInfo["ruleAlarm"] { payload["ruleAlarm"] = ra }
+        if let ea = userInfo["effectiveAlarm"] { payload["effectiveAlarm"] = ea }
+        if let ch = userInfo["pushChannel"] { payload["pushChannel"] = ch }
+        payload["mailData"] = mailMap
+
+        sink(payload)
+    }
+
+    // MARK: - Dedupe helpers
+    private func markProcessed(_ key: String) {
+        processedMessageIds.setObject(NSNumber(value: true), forKey: key as NSString)
+        cacheCount += 1
+        if cacheCount > maxCacheSize {
+            processedMessageIds.removeAllObjects()
+            cacheCount = 0
+        }
+    }
+
+    private func isAlreadyProcessed(_ key: String) -> Bool {
+        return processedMessageIds.object(forKey: key as NSString) != nil
+    }
+
+    // MARK: - TTS
+    private func speak(_ text: String, lang: String? = nil) {
+        if isTTSSpeaking && !synthesizer.isSpeaking {
+            isTTSSpeaking = false
+        }
+        guard !isTTSSpeaking else { return }
+        isTTSSpeaking = true
+        let session = AVAudioSession.sharedInstance()
+        func activateAndSpeak() throws {
+            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try session.setActive(true)
+            let utter = AVSpeechUtterance(string: text)
+            if let code = (lang ?? currentTtsLang), let v = AVSpeechSynthesisVoice(language: code) {
+                utter.voice = v
+            }
+            utter.rate = 0.5
+            utter.preUtteranceDelay = 0.2
+            utter.volume = 0.7 //tts volume
+            synthesizer.speak(utter)
+        }
+        do { try activateAndSpeak() }
+        catch {
+            isTTSSpeaking = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                guard let self = self else { return }
+                if self.isTTSSpeaking && !self.synthesizer.isSpeaking { self.isTTSSpeaking = false }
+                self.isTTSSpeaking = true
+                do { try activateAndSpeak() } catch {
+                    self.isTTSSpeaking = false
+                    try? session.setActive(false, options: .notifyOthersOnDeactivation)
+                    if !self.isAlarmLoopRunning { self.endBGTask() }
+                }
+            }
+        }
+    }
+
+    // MARK: - Rule sound playback
+    // [RULE_SOUND] 규칙 사운드를 1회 재생 (없으면 siren/기본으로 폴백)
+    private func playRuleSoundOnceOrDefault() {
+        // 규칙 사운드가 지정된 경우 mp3/caf 우선순위로 탐색
+        if let base = loopSoundName, !base.isEmpty {
+            if let url = Bundle.main.url(forResource: base, withExtension: "mp3") {
+                play(url: url); return
+            }
+            if let url = Bundle.main.url(forResource: base, withExtension: "caf") {
+                play(url: url); return
+            }
+        }
+        // 폴백: siren
+        playSirenOnce()
+    }
+
+    // 기존 siren 재생 (폴백)
+    private func playSirenOnce() {
+        if let url = Bundle.main.url(forResource: "siren", withExtension: "caf") {
+            play(url: url); return
+        }
+        if let url = Bundle.main.url(forResource: "siren", withExtension: "mp3") {
+            play(url: url); return
+        }
+        stopAlarmLoop()
+    }
+
+    private func play(url: URL) {
+        do {
+            sirenPlayer = try AVAudioPlayer(contentsOf: url)
+            sirenPlayer?.delegate = self
+            sirenPlayer?.volume = 0.5
+            sirenPlayer?.numberOfLoops = 0
+            sirenPlayer?.prepareToPlay()
+            sirenPlayer?.play()
+        } catch {
+            stopAlarmLoop()
+        }
+    }
+
+    // MARK: - Loop (UNTIL)
     func startAlarmLoop(text: String, lang: String?, mode: String) {
         guard mode == "loop" else { return }
 
-        // ✅ 새 루프 시작/갱신 시 항상 깨끗한 상태로
         if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
         isTTSSpeaking = false
         sirenPlayer?.stop()
         sirenPlayer = nil
 
-        // 이미 루프 중이더라도 텍스트/언어 갱신은 허용
         if isAlarmLoopRunning {
             currentTtsLang = lang
             currentTtsText = text
-            // 다음 사이렌 → TTS 순서가 보장되도록 토글 리셋
             alternatingLoop = true
             ttsQueuedNextSiren = false
-            // 즉시 다음 사이클 시작
-            DispatchQueue.main.async { [weak self] in self?.playSirenOnce() }
+            DispatchQueue.main.async { [weak self] in self?.playRuleSoundOnceOrDefault() }  // [RULE_SOUND]
             return
         }
         isAlarmLoopRunning = true
@@ -392,92 +491,35 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
                 self.alternatingLoop = false
                 return
             }
-            self.playSirenOnce()
+            // 첫 사이클: 규칙 사운드 → TTS → 규칙 사운드 ...
+            self.playRuleSoundOnceOrDefault()  // [RULE_SOUND]
         }
     }
 
-    private func speak(_ text: String, lang: String? = nil) {
-         // ✅ 플래그 스티키 복구
-        if isTTSSpeaking && !synthesizer.isSpeaking {
-            isTTSSpeaking = false
-        }
-        guard !isTTSSpeaking else { return }
-        isTTSSpeaking = true
-        let session = AVAudioSession.sharedInstance()
-        func activateAndSpeak() throws {
-            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-            try session.setActive(true)
-            let utter = AVSpeechUtterance(string: text)
-            if let code = (lang ?? currentTtsLang), let v = AVSpeechSynthesisVoice(language: code) {
-                utter.voice = v
-            }
-            utter.rate = 0.5
-            utter.preUtteranceDelay = 0.2
-            utter.volume = 1.0
-            synthesizer.speak(utter)
-        }
-        do { try activateAndSpeak() }
-        catch {
-            isTTSSpeaking = false
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
-                guard let self = self else { return }
-                if self.isTTSSpeaking && !self.synthesizer.isSpeaking { self.isTTSSpeaking = false }
-                self.isTTSSpeaking = true
-                do { try activateAndSpeak() } catch {
-                    self.isTTSSpeaking = false
-                    try? session.setActive(false, options: .notifyOthersOnDeactivation)
-                    if !self.isAlarmLoopRunning { self.endBGTask() }
-                }
-            }
-        }
-    }
-
-    private func playSirenOnce() {
-        if let url = Bundle.main.url(forResource: "siren", withExtension: "caf") {
-            play(url: url); return
-        }
-        if let url = Bundle.main.url(forResource: "siren", withExtension: "mp3") {
-            play(url: url); return
-        }
-        stopAlarmLoop()
-    }
-
-    private func play(url: URL) {
-        do {
-            sirenPlayer = try AVAudioPlayer(contentsOf: url)
-            sirenPlayer?.delegate = self
-            sirenPlayer?.volume = 1.0
-            sirenPlayer?.numberOfLoops = 0
-            sirenPlayer?.prepareToPlay()
-            sirenPlayer?.play()
-        } catch {
-            stopAlarmLoop()
-        }
-    }
-
+    // MARK: - AVAudioPlayerDelegate
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         guard isAlarmLoopRunning, alternatingLoop else { return }
         if let text = currentTtsText {
             ttsQueuedNextSiren = true
             speak(text, lang: currentTtsLang)
 
-            // ✅ 워치독: 1.5초 안에 실제 TTS가 시작 안되면 사이렌로 재진입
+            // 워치독: 1.5초 내 TTS 시작 못하면 다시 규칙 사운드
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self = self else { return }
                 if self.isAlarmLoopRunning && !self.synthesizer.isSpeaking && self.ttsQueuedNextSiren {
-                    // TTS가 못 올라갔다면 다시 시도 or 다음 사이렌으로 넘어가 루프 유지
                     self.ttsQueuedNextSiren = false
-                    self.playSirenOnce()
+                    self.playRuleSoundOnceOrDefault()  // [RULE_SOUND]
                 }
             }
         }
     }
 
+    // MARK: - AVSpeechSynthesizerDelegate
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         isTTSSpeaking = false
         if isAlarmLoopRunning, alternatingLoop, ttsQueuedNextSiren {
             ttsQueuedNextSiren = false
-            DispatchQueue.main.async { [weak self] in self?.playSirenOnce() }
+            DispatchQueue.main.async { [weak self] in self?.playRuleSoundOnceOrDefault() } // [RULE_SOUND]
             return
         }
         if !isAlarmLoopRunning {
@@ -486,6 +528,7 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
         }
     }
 
+    // MARK: - Stop
     func stopAlarmLoop(completion: (() -> Void)? = nil) {
         DispatchQueue.main.async {
             self.isAlarmLoopRunning = false
@@ -499,12 +542,24 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
         }
     }
 
+    // MARK: - TTS 텍스트 선택 (기존 유지)
+    // 기존 pickTTS 교체
     private func pickTTS(from userInfo: [AnyHashable: Any]) -> (String, String?) {
+        // 1) 서버 payload 최우선
+        if let t = userInfo["tts"] as? String, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return (t, nil)   // 언어는 iOS가 자동선택(또는 필요 시 규칙 확장으로 lang도 내려줄 수 있음)
+        }
+        if let cd = userInfo["custom_data"] as? [String: Any],
+        let t = cd["tts"] as? String, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return (t, nil)
+        }
+
+        // 2) 없으면 기존 휴리스틱
         var text = "緊急メールが届きました"
         var lang: String? = "ja-JP"
         if let mailDataString = userInfo["mailData"] as? String,
-           let data = mailDataString.data(using: .utf8),
-           let md = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        let data = mailDataString.data(using: .utf8),
+        let md = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             let subject = (md["subject"] as? String) ?? ""
             let body = (md["body"] as? String) ?? ""
             if subject.contains("미팅") || body.contains("미팅") {
@@ -514,6 +569,7 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
         }
         return (text, lang)
     }
+
 
     // MARK: - FlutterStreamHandler
     public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
@@ -525,3 +581,5 @@ func extractDedupeKey(_ userInfo: [AnyHashable: Any]) -> String? {
         return nil
     }
 }
+
+

@@ -77,7 +77,14 @@
   "logicAnd": "AND（すべて一致）",
   "logicOr": "OR（いずれか一致）",
   "needLogicForConditions": "各条件のキーワードロジック（AND / OR）を選択してください。",
-  
+  "keywordInputHelper": "カンマ（,）・セミコロン（;）・改行で複数入力できます。",
+  "enterSoundOrTts": "サウンドまたはTTSメッセージを 1 つ以上設定していただけますか。",
+  "soundLabel": "サウンド",
+  "selectSoundHint": "サウンドを選択します。",
+  "ttsMessageLabel": "TTS メッセージ",
+  "ttsMessageHint": "例: 緊急メールが届きました",
+
+
   "loginTitle": "ログイン",
   "langKorean": "한국어",
   "langEnglish": "English",

@@ -77,7 +77,13 @@
   "logicAnd": "AND (모두 일치)",
   "logicOr": "OR (하나 이상 일치)",
   "needLogicForConditions": "각 조건의 키워드 로직(AND / OR)을 선택하세요.",
-  
+  "keywordInputHelper": "쉼표(,)·세미콜론(;)·줄바꿈으로 여러 개 입력할 수 있어요.",
+  "enterSoundOrTts": "사운드 또는 TTS 메시지를 하나 이상 설정해 주세요.",
+  "soundLabel": "사운드",
+  "selectSoundHint": "사운드를 선택하세요",
+  "ttsMessageLabel": "TTS 메시지",
+  "ttsMessageHint": "예: 긴급 메일이 도착했습니다.",
+
   "loginTitle": "로그인",
   "langKorean": "한국어",
   "langEnglish": "English",

@@ -37,6 +37,8 @@ dependencies:
   nb_utils: ^7.0.6
   google_fonts: ^6.3.1
   url_launcher: ^6.3.2
+  just_audio: ^0.10.5
+  audio_session: ^0.2.2
 
 dev_dependencies:
   flutter_test:
@@ -61,7 +63,7 @@ flutter_native_splash:
 flutter:
   generate: true  # gen-l10n 활성화
   assets:
-    - assets/sounds/siren.mp3
+    - assets/sounds/
     - assets/icons/
     - assets/.env
     

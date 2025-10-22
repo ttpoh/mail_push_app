@@ -21,14 +21,9 @@ class RulesApi {
   }
 
   Future<List<MailRule>> fetchRules({String? fcmToken, String? authToken}) async {
-    final uri = _buildUri('', {
-      if (fcmToken != null) 'fcm_token': fcmToken,
-    });
-    final headers = {
-      'Accept': 'application/json',
-      ...defaultHeaders,
-      if (authToken != null) 'Authorization': 'Bearer $authToken',
-    };
+    final uri = _buildUri('', { if (fcmToken != null) 'fcm_token': fcmToken });
+    final headers = { 'Accept': 'application/json', ...defaultHeaders,
+      if (authToken != null) 'Authorization': 'Bearer $authToken' };
     final resp = await http.get(uri, headers: headers);
     if (resp.statusCode == 200) {
       final List<dynamic> arr = jsonDecode(resp.body);
@@ -40,13 +35,10 @@ class RulesApi {
 
   Future<int> createRule(MailRule rule, {String? fcmToken, String? authToken}) async {
     final uri = _buildUri('');
-    final headers = {
-      'Content-Type': 'application/json',
-      ...defaultHeaders,
-      if (authToken != null) 'Authorization': 'Bearer $authToken',
-    };
+    final headers = { 'Content-Type': 'application/json', ...defaultHeaders,
+      if (authToken != null) 'Authorization': 'Bearer $authToken' };
     final body = {
-      ...rule.toJson(),                 // alarm 포함
+      ...rule.toJson(),                // ✅ rule.sound 포함
       if (fcmToken != null) 'fcm_token': fcmToken,
     };
     final resp = await http.post(uri, headers: headers, body: jsonEncode(body));
@@ -61,13 +53,10 @@ class RulesApi {
   Future<void> updateRule(MailRule rule, {String? fcmToken, String? authToken}) async {
     if (rule.id == null) throw ArgumentError('rule.id is required for update');
     final uri = _buildUri('/${rule.id}');
-    final headers = {
-      'Content-Type': 'application/json',
-      ...defaultHeaders,
-      if (authToken != null) 'Authorization': 'Bearer $authToken',
-    };
+    final headers = { 'Content-Type': 'application/json', ...defaultHeaders,
+      if (authToken != null) 'Authorization': 'Bearer $authToken' };
     final body = {
-      ...rule.toJson(),                 // alarm 포함
+      ...rule.toJson(),                // ✅ rule.sound 포함
       if (fcmToken != null) 'fcm_token': fcmToken,
     };
     final resp = await http.put(uri, headers: headers, body: jsonEncode(body));
@@ -77,13 +66,8 @@ class RulesApi {
   }
 
   Future<void> deleteRule(int id, {String? fcmToken, String? authToken}) async {
-    final uri = _buildUri('/$id', {
-      if (fcmToken != null) 'fcm_token': fcmToken,
-    });
-    final headers = {
-      ...defaultHeaders,
-      if (authToken != null) 'Authorization': 'Bearer $authToken',
-    };
+    final uri = _buildUri('/$id', { if (fcmToken != null) 'fcm_token': fcmToken });
+    final headers = { ...defaultHeaders, if (authToken != null) 'Authorization': 'Bearer $authToken' };
     final resp = await http.delete(uri, headers: headers);
     if (resp.statusCode != 200) {
       throw Exception('deleteRule failed ${resp.statusCode}: ${resp.body}');

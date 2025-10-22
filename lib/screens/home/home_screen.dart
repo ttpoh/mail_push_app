@@ -569,29 +569,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  // import 'package:mail_push_app/fcm/fcm_service.dart' show AlarmSettingsStore;
+  // ↑ AlarmSettingsStore를 사용하지 않는 구조라면, 해당 import 경로에 맞춰 수정하세요.
+
   void _openAlarmDialog() async {
+    // iOS 네이티브 루프 상태 최신화
     await widget.fcmService.isAlarmLoopRunning();
 
-    showAlarmSettingsDialog(
+    await showAlarmSettingsDialogWithServerDefaults(
       context: context,
-      normalOn: _normalOn,
-      criticalOn: _criticalOn,
-      criticalUntilStopped: _criticalUntilStopped,
       sync: _alarmSync,
+      fallbackNormalOn: _normalOn, // 로컬 캐시가 있으면 기본값으로 전달
       onNormalChanged: (v) async {
+        // UI 반영
         setState(() => _normalOn = v);
-        await _persistSettings();
-        await _upsertEmailAndFlags();
-      },
-      onCriticalChanged: (v) async {
-        setState(() => _criticalOn = v);
-        await _persistSettings();
-        await _upsertEmailAndFlags();
-      },
-      onCriticalUntilChanged: (v) async {
-        setState(() => _criticalUntilStopped = v);
-        await _persistSettings();
-        await _upsertEmailAndFlags();
+
+        // 전역 스위치(일반 알람)만 로컬/서버에 반영
+        await AlarmSettingsStore.setGlobalOn(v);
+        await _alarmSync.patchFlags(normalOn: v); // 서버 업서트 (normal_on만)
+
+        // OFF로 전환 시, 울리는 중이면 즉시 중지
+        if (!v) {
+          try {
+            await widget.fcmService.stopAlarmByUser();
+          } catch (_) {}
+        }
       },
       onOpenAppNotificationSettings: _openAppNotificationSettings,
       onStopAlarm: () async {
@@ -612,6 +614,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       },
     );
   }
+
 
   void _openRules() {
     Navigator.of(context)

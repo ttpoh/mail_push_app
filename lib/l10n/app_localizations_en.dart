@@ -185,6 +185,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get needKeywordsInAllConditions => 'Every condition must contain keywords.';
 
   @override
+  String get keywordInputHelper => 'You can enter multiple items using commas (,), semicolons (;), or new lines.';
+
+  @override
   String get ruleSaveFailed => 'Failed to save rule. Please try again.';
 
   @override
@@ -207,6 +210,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get needLogicForConditions => 'Please choose keyword logic (AND / OR) for each condition.';
+
+  @override
+  String get enterSoundOrTts => 'Please set at least one sound or TTS message.';
+
+  @override
+  String get soundLabel => 'sound';
+
+  @override
+  String get selectSoundHint => 'Please select the sound.';
+
+  @override
+  String get ttsMessageLabel => 'TTS message';
+
+  @override
+  String get ttsMessageHint => 'Example: Emergency mail has arrived.';
 
   @override
   String get loginTitle => 'Login';

@@ -185,6 +185,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get needKeywordsInAllConditions => 'すべての条件にキーワードを入れてください。';
 
   @override
+  String get keywordInputHelper => 'カンマ（,）・セミコロン（;）・改行で複数入力できます。';
+
+  @override
   String get ruleSaveFailed => 'ルールの保存に失敗しました。もう一度お試しください。';
 
   @override
@@ -207,6 +210,21 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get needLogicForConditions => '各条件のキーワードロジック（AND / OR）を選択してください。';
+
+  @override
+  String get enterSoundOrTts => 'サウンドまたはTTSメッセージを 1 つ以上設定していただけますか。';
+
+  @override
+  String get soundLabel => 'サウンド';
+
+  @override
+  String get selectSoundHint => 'サウンドを選択します。';
+
+  @override
+  String get ttsMessageLabel => 'TTS メッセージ';
+
+  @override
+  String get ttsMessageHint => '例: 緊急メールが届きました';
 
   @override
   String get loginTitle => 'ログイン';

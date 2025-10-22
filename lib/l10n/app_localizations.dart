@@ -421,6 +421,12 @@ abstract class AppLocalizations {
   /// **'Every condition must contain keywords.'**
   String get needKeywordsInAllConditions;
 
+  /// No description provided for @keywordInputHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'You can enter multiple items using commas (,), semicolons (;), or new lines.'**
+  String get keywordInputHelper;
+
   /// No description provided for @ruleSaveFailed.
   ///
   /// In en, this message translates to:
@@ -468,6 +474,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Please choose keyword logic (AND / OR) for each condition.'**
   String get needLogicForConditions;
+
+  /// No description provided for @enterSoundOrTts.
+  ///
+  /// In en, this message translates to:
+  /// **'Please set at least one sound or TTS message.'**
+  String get enterSoundOrTts;
+
+  /// No description provided for @soundLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'sound'**
+  String get soundLabel;
+
+  /// No description provided for @selectSoundHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Please select the sound.'**
+  String get selectSoundHint;
+
+  /// No description provided for @ttsMessageLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'TTS message'**
+  String get ttsMessageLabel;
+
+  /// No description provided for @ttsMessageHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Example: Emergency mail has arrived.'**
+  String get ttsMessageHint;
 
   /// No description provided for @loginTitle.
   ///

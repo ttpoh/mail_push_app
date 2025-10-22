@@ -10,6 +10,98 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mail_push_app/models/email.dart';
 import 'package:mail_push_app/utils/navigation_service.dart';
 import 'package:flutter/foundation.dart' show ValueNotifier, defaultTargetPlatform, TargetPlatform;
+// 🔽 [ADDED]
+import 'package:just_audio/just_audio.dart';
+
+/// ===============================================================
+/// ② assets/sounds/*.mp3 목록 로드 유틸 (AssetManifest.json 파싱)
+/// ===============================================================
+Future<List<String>> listSoundAssets({
+  String prefix = 'assets/sounds/',
+  String extension = '.mp3',
+}) async {
+  try {
+    final raw = await rootBundle.loadString('AssetManifest.json');
+    final Map<String, dynamic> manifest = json.decode(raw) as Map<String, dynamic>;
+    final items = manifest.keys
+        .where((k) =>
+            k.startsWith(prefix) &&
+            k.toLowerCase().endsWith(extension.toLowerCase()))
+        .toList()
+      ..sort();
+    return items;
+  } catch (e) {
+    debugPrint('⚠️ listSoundAssets error: $e');
+    return const <String>[];
+  }
+}
+
+/// 파일명만 표시하고 싶을 때 사용
+String soundDisplayName(String assetPath) {
+  final p = assetPath.trim();
+  if (p.isEmpty) return '';
+  final idx = p.lastIndexOf('/');
+  return (idx >= 0 && idx < p.length - 1) ? p.substring(idx + 1) : p;
+}
+
+/// ===============================================================
+/// ③ 미리듣기 싱글턴 유틸 (JustAudio)
+/// - Dialog/위젯 어디서든 SoundPreview.instance 로 사용
+/// ===============================================================
+class SoundPreview {
+  SoundPreview._() {
+    _player.playerStateStream.listen((s) {
+      isPlaying.value = s.playing;
+    });
+  }
+  static final SoundPreview instance = SoundPreview._();
+
+  final AudioPlayer _player = AudioPlayer();
+  /// 단순 재생 여부 관찰용
+  final ValueNotifier<bool> isPlaying = ValueNotifier<bool>(false);
+
+  /// 선택된 에셋을 즉시 재생 (같은 곡 전환도 자동 처리)
+  Future<void> playAsset(String? assetPath) async {
+    if (assetPath == null || assetPath.isEmpty) {
+      await stop();
+      return;
+    }
+    try {
+      await _player.setAsset(assetPath);
+      await _player.play();
+    } catch (e) {
+      debugPrint('❌ SoundPreview.playAsset error: $e');
+    }
+  }
+
+  Future<void> pause() async {
+    try {
+      await _player.pause();
+    } catch (e) {
+      debugPrint('❌ SoundPreview.pause error: $e');
+    }
+  }
+
+  Future<void> stop() async {
+    try {
+      await _player.stop();
+    } catch (e) {
+      debugPrint('❌ SoundPreview.stop error: $e');
+    }
+  }
+
+  /// 앱 전역 싱글턴이라 일반적으로 호출 필요 없음.
+  /// (정리하고 싶을 때 호출)
+  Future<void> dispose() async {
+    try {
+      await _player.dispose();
+    } catch (e) {
+      debugPrint('❌ SoundPreview.dispose error: $e');
+    }
+  }
+}
+
+/// 기존 코드 ================================================
 
 String _dedupeKeyFromData(Map<String, dynamic> d, String? fallbackMsgId) {
   // 1) mailData에서 메일 고유 ID를 먼저 시도
@@ -36,9 +128,8 @@ String _dedupeKeyFromData(Map<String, dynamic> d, String? fallbackMsgId) {
   return '$mid:$ver';
 }
 
-
 class AlarmSettingsStore {
-  static const _kCriticalOn = 'criticalOn';
+  static const _kGlobalOn = 'alarm_normal_on';
   static const _kLastMsgId = 'last_message_id';
   static const _kLastTtsId = 'last_tts_message_id';
   static const _kProcessedIds = 'processed_ids_cache';
@@ -63,14 +154,15 @@ class AlarmSettingsStore {
     return cacheStr.split(',').contains(id);
   }
 
-  static Future<void> setCriticalOn(bool v) async {
+  static Future<void> setGlobalOn(bool v) async {
     final sp = await SharedPreferences.getInstance();
-    await sp.setBool(_kCriticalOn, v);
+    await sp.setBool(_kGlobalOn, v);
   }
 
-  static Future<bool> getCriticalOn() async {
+  static Future<bool> getGlobalOn() async {
     final sp = await SharedPreferences.getInstance();
-    return sp.getBool(_kCriticalOn) ?? true;
+    // 기본값 true (앱 첫 실행 시에도 울리도록)
+    return sp.getBool(_kGlobalOn) ?? true;
   }
 
   static Future<bool> isDuplicateAndMark(
@@ -403,7 +495,6 @@ class FcmService {
     _emitEmail(email);
   }
 
-
   Future<void> _maybeSpeakOnceIfOneShot(Map<String, dynamic> data) async {
     if (defaultTargetPlatform != TargetPlatform.iOS) return;
 
@@ -417,7 +508,8 @@ class FcmService {
     if (await AlarmSettingsStore.isDuplicateTtsAndMark('tts_once_$msgId')) {
       return;
     }
-
+  
+    final ttsOverride = (data['tts'] as String?)?.trim();
     String? subject, body;
     try {
       final mailMap =
@@ -426,8 +518,17 @@ class FcmService {
       body = (mailMap['body'] ?? '').toString();
     } catch (_) {}
 
-    final tts = _buildTtsForLocale(subject: subject, body: body);
-    final ttsText = tts['text']!, ttsLang = tts['lang']!;
+    String ttsText, ttsLang;
+    if (ttsOverride != null && ttsOverride.isNotEmpty) {
+      ttsText = ttsOverride;
+      ttsLang = _buildTtsForLocale(subject: subject, body: body)['lang']!;
+    } else {
+      final t = _buildTtsForLocale(subject: subject, body: body);
+      ttsText = t['text']!;
+      ttsLang = t['lang']!;
+    }
+
+
     await Future.delayed(const Duration(milliseconds: 800));
     try {
       const ttsChannel = MethodChannel('com.secure.mail_push_app/tts');
@@ -443,8 +544,21 @@ class FcmService {
     final sender = mailMap?['sender'] ?? data['sender'] ?? 'Unknown Sender';
 
     final serverCritical = data['isCritical'] == 'true';
-    final allowCritical = await AlarmSettingsStore.getCriticalOn();
-    final effectiveCritical = serverCritical && allowCritical;
+    // ✅ 전역 허용 여부(일반 알람 스위치)
+    final globalOn = await AlarmSettingsStore.getGlobalOn();
+
+    // 전역 OFF면 배너/로컬/루프 모두 스킵
+    if (!globalOn) {
+      debugPrint('📵 Global alarm OFF → skip local notification');
+      return;
+    }
+
+    // ✅ 규칙 사운드 이름(확장자 제외)
+    final ruleSound = (data['sound'] as String?)?.trim();
+    final hasCustomSound = ruleSound != null && ruleSound.isNotEmpty && ruleSound != 'default';
+
+
+    final effectiveCritical = serverCritical; // ← 전역 ON이면 서버 의도 그대로
 
     final androidDetails = AndroidNotificationDetails(
       effectiveCritical ? _chCriticalId : _chGeneralId,
@@ -478,6 +592,16 @@ class FcmService {
       );
     }
 
+    if (Platform.isAndroid) {
+      final until = (data['criticalUntil']?.toString().toLowerCase() == 'true');
+      if (!until && (hasCustomSound || ruleSound == 'default')) {
+        final asset = hasCustomSound ? 'assets/sounds/$ruleSound.mp3' : null;
+        if (asset != null) {
+          await SoundPreview.instance.playAsset(asset);
+        }
+      }
+    }
+
     await _maybeSpeakOnceIfOneShot(data);
     await _startLoopIfNeeded(data);
   }
@@ -489,9 +613,13 @@ class FcmService {
     final criticalUntil = (rawUntil is bool && rawUntil) ||
         (rawUntil is String && rawUntil.toLowerCase() == 'true');
     final serverCritical = data['isCritical'] == 'true';
-    final allowCritical = await AlarmSettingsStore.getCriticalOn();
-    final effectiveCritical = serverCritical && allowCritical;
+    final globalOn = await AlarmSettingsStore.getGlobalOn();
+    if (!globalOn) return;
+
+    final effectiveCritical = serverCritical;
     if (!effectiveCritical || !criticalUntil) return;
+
+    final ttsOverride = (data['tts'] as String?)?.trim();
 
     String? subject, body;
     try {
@@ -501,8 +629,16 @@ class FcmService {
       body = (mailMap['body'] ?? '').toString();
     } catch (_) {}
 
-    final tts = _buildTtsForLocale(subject: subject, body: body);
-    final ttsText = tts['text']!, ttsLang = tts['lang']!;
+    String ttsText, ttsLang;
+    if (ttsOverride != null && ttsOverride.isNotEmpty) {
+      ttsText = ttsOverride;
+      ttsLang = _buildTtsForLocale(subject: subject, body: body)['lang']!;
+    } else {
+      final t = _buildTtsForLocale(subject: subject, body: body);
+      ttsText = t['text']!;
+      ttsLang = t['lang']!;
+    }
+
 
     try {
       await _alarmLoopChannel.invokeMethod(
@@ -595,11 +731,11 @@ class FcmService {
 
 // Android BG isolate (iOS는 네이티브/OS가 배너 처리)
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // iOS BG에서 until=TRUE는 네이티브 루프 전담 → Dart BG는 NO-OP
   if (defaultTargetPlatform == TargetPlatform.iOS) {
     final d = message.data;
     final isCritical = d['isCritical'] == 'true';
-    final until =
-        (d['criticalUntil']?.toString().toLowerCase() == 'true');
+    final until = (d['criticalUntil']?.toString().toLowerCase() == 'true');
     if (isCritical && until) {
       debugPrint('🔕 iOS until=TRUE BG: hand off to native; Dart BG no-op');
       return;
@@ -608,25 +744,38 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
   debugPrint('🔔 백그라운드 알림 수신(data): ${message.data}');
   final data = message.data;
+
+  // 규칙 매칭 안 된 푸시는 무시
   if (data['ruleMatched'] != 'true') return;
 
+  // 중복 억제 키 생성
   final key = _dedupeKeyFromData(data, message.messageId);
   if (key.isEmpty) return;
 
+  // BG 중복 캐시 체크
   final dup = await AlarmSettingsStore.isDuplicateAndMark(key);
   if (dup) {
     debugPrint('🚫 Duplicate detected in BG: $key');
     return;
   }
 
-  final serverCritical = data['isCritical'] == 'true';
-  final allowCritical = await AlarmSettingsStore.getCriticalOn();
-  final effectiveCritical = serverCritical && allowCritical;
+  // ✅ 전역 스위치(일반 알람) OFF면 모든 표시 스킵
+  final globalOn = await AlarmSettingsStore.getGlobalOn();
+  if (!globalOn) {
+    debugPrint('📵 Global alarm OFF → skip showing BG notification');
+    return;
+  }
 
+  // 서버가 내려준 의도 그대로 사용 (전역 ON일 때만)
+  final serverCritical = data['isCritical'] == 'true';
+  final effectiveCritical = serverCritical;
+
+  // 표시용 제목/보낸이
   final mail = data['mailData'] != null ? jsonDecode(data['mailData']) : {};
   final subject = mail['subject'] ?? '새 이메일';
-  final sender = mail['sender'] ?? 'Unknown Sender';
+  final sender  = mail['sender']  ?? 'Unknown Sender';
 
+  // 로컬 노티 표시
   final plugin = FlutterLocalNotificationsPlugin();
   final androidDetails = AndroidNotificationDetails(
     effectiveCritical ? FcmService._chCriticalId : FcmService._chGeneralId,
@@ -634,8 +783,10 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
     importance: effectiveCritical ? Importance.max : Importance.high,
     playSound: effectiveCritical,
   );
-  const iosDetails =
-      DarwinNotificationDetails(presentAlert: true, presentSound: true);
+  const iosDetails = DarwinNotificationDetails(
+    presentAlert: true,
+    presentSound: true,
+  );
   final nd = NotificationDetails(android: androidDetails, iOS: iosDetails);
 
   await plugin.show(
