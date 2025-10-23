@@ -30,7 +30,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get alarmSettingsTitle => '通知設定';
 
   @override
-  String get generalAlarmLabel => '通常アラーム';
+  String get generalAlarmLabel => 'アラーム';
 
   @override
   String get generalAlarmSubtitle => 'サイレント/おやすみモードは迂回しません';
@@ -218,10 +218,10 @@ class AppLocalizationsJa extends AppLocalizations {
   String get soundLabel => 'サウンド';
 
   @override
-  String get selectSoundHint => 'サウンドを選択します。';
+  String get selectSoundHint => 'サウンドを選択してください';
 
   @override
-  String get ttsMessageLabel => 'TTS メッセージ';
+  String get ttsMessageLabel => 'TTSメッセージ';
 
   @override
   String get ttsMessageHint => '例: 緊急メールが届きました';
@@ -258,4 +258,22 @@ class AppLocalizationsJa extends AppLocalizations {
   String loginError(String error) {
     return 'ログインエラー: $error';
   }
+
+  @override
+  String get alarmSoundLabel => 'サウンド';
+
+  @override
+  String get previewSound => '試聴';
+
+  @override
+  String get oneTimeAlarm => '1回だけ鳴動';
+
+  @override
+  String get untilStoppedAlarm => '止めるまで鳴動';
+
+  @override
+  String get alarmTitleOneTime => '1回鳴動';
+
+  @override
+  String get alarmTitleUntil => '止めるまで';
 }

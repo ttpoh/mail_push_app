@@ -7,7 +7,7 @@
   "waitingNewEmails": "Waiting for new emails...",
   "settingsOpenError": "Unable to open settings screen.",
   "alarmSettingsTitle": "Notification settings",
-  "generalAlarmLabel": "General alerts",
+  "generalAlarmLabel": "alerts",
   "generalAlarmSubtitle": "Does not bypass Silent/Do Not Disturb",
   "criticalAlarmLabel": "Critical alerts (allow in Silent)",
   "criticalAlarmSubtitle": "May bypass Do Not Disturb if needed",
@@ -95,5 +95,16 @@
   "loginFailed": "Login failed for {service}",
   "@loginFailed": { "placeholders": { "service": { "type": "String" } } },
   "loginError": "Login error: {error}",
-  "@loginError": { "placeholders": { "error": { "type": "String" } } }
+  "@loginError": { "placeholders": { "error": { "type": "String" } } },
+
+  "alarmSoundLabel": "Sound",
+  "previewSound": "Preview",
+  "ttsMessageLabel": "TTS message",
+  "ttsMessageHint": "Ex: Emergency mail has arrived.",
+  "oneTimeAlarm": "Ring once",
+  "untilStoppedAlarm": "Ring until stopped",
+  "addCondition": "Add condition",
+  "selectSoundHint": "Select a sound",
+  "alarmTitleOneTime": "Ring Once",
+  "alarmTitleUntil": "Until Stopped"
 }

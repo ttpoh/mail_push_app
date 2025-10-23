@@ -7,7 +7,7 @@
   "waitingNewEmails": "新しいメールの受信待ち...",
   "settingsOpenError": "設定画面を開けませんでした。",
   "alarmSettingsTitle": "通知設定",
-  "generalAlarmLabel": "通常アラーム",
+  "generalAlarmLabel": "アラーム",
   "generalAlarmSubtitle": "サイレント/おやすみモードは迂回しません",
   "criticalAlarmLabel": "緊急アラーム（サイレント中も許可）",
   "criticalAlarmSubtitle": "必要に応じておやすみモードも迂回します",
@@ -96,5 +96,16 @@
   "loginFailed": "{service} のログインに失敗しました",
   "@loginFailed": { "placeholders": { "service": { "type": "String" } } },
   "loginError": "ログインエラー: {error}",
-  "@loginError": { "placeholders": { "error": { "type": "String" } } }
+  "@loginError": { "placeholders": { "error": { "type": "String" } } },
+
+  "alarmSoundLabel": "サウンド",
+  "previewSound": "試聴",
+  "ttsMessageLabel": "TTSメッセージ",
+  "ttsMessageHint": "例: 緊急メールが届きました",
+  "oneTimeAlarm": "1回だけ鳴動",
+  "untilStoppedAlarm": "止めるまで鳴動",
+  "addCondition": "条件追加",
+  "selectSoundHint": "サウンドを選択してください",
+  "alarmTitleOneTime": "1回鳴動",
+  "alarmTitleUntil": "止めるまで"
 }

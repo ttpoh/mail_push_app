@@ -98,7 +98,7 @@ Future<void> showAlarmSettingsDialog({
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text(t.generalAlarmLabel, style: const TextStyle(color: Colors.black)),
-                      subtitle: Text(t.generalAlarmSubtitle, style: TextStyle(color: ec.eventLightSecondaryTextColor)),
+                      // subtitle: Text(t.generalAlarmSubtitle, style: TextStyle(color: ec.eventLightSecondaryTextColor)),
                       value: _normal,
                       activeColor: ec.eventPrimaryColor,
                       onChanged: (v) {

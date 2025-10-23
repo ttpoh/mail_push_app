@@ -1,4 +1,7 @@
-// rule_model.dart
+// lib/models/rule_model.dart
+import 'package:mail_push_app/l10n/app_localizations.dart';
+import 'package:flutter/widgets.dart';
+
 enum ConditionType {
   subjectContains,
   bodyContains,
@@ -6,14 +9,15 @@ enum ConditionType {
 }
 
 extension ConditionTypeExt on ConditionType {
-  String get displayName {
+  String displayName(BuildContext context) {
+    final t = AppLocalizations.of(context)!;
     switch (this) {
       case ConditionType.subjectContains:
-        return 'タイトルに含まれる'; // 제목에 포함
+        return t.conditionTypeSubjectContains;
       case ConditionType.bodyContains:
-        return '内容に含まれる'; // 내용에 포함
+        return t.conditionTypeBodyContains;
       case ConditionType.fromSender:
-        return '差出人'; // 보낸 사람
+        return t.conditionTypeFromSender;
     }
   }
 
@@ -33,11 +37,21 @@ extension ConditionTypeExt on ConditionType {
   }
 }
 
-/// ✅ 키워드 매칭 로직(AND / OR)
 enum LogicType { and, or }
 
 extension LogicTypeExt on LogicType {
-  String get apiValue => name; // 서버도 "and" / "or" 문자열 사용
+  String displayName(BuildContext context) {
+    final t = AppLocalizations.of(context)!;
+    switch (this) {
+      case LogicType.and:
+        return t.logicAnd;
+      case LogicType.or:
+        return t.logicOr;
+    }
+  }
+
+  String get apiValue => name;
+
   static LogicType fromApiValue(String t) {
     switch (t) {
       case 'and':
@@ -49,11 +63,23 @@ extension LogicTypeExt on LogicType {
   }
 }
 
-/// ✅ 규칙별 알람 레벨
 enum AlarmLevel { normal, critical, until }
 
 extension AlarmLevelExt on AlarmLevel {
+  String displayName(BuildContext context) {
+    final t = AppLocalizations.of(context)!;
+    switch (this) {
+      case AlarmLevel.normal:
+        return t.generalAlarmLabel;
+      case AlarmLevel.critical:
+        return t.oneTimeAlarm;
+      case AlarmLevel.until:
+        return t.untilStoppedAlarm;
+    }
+  }
+
   String get apiValue => name;
+
   static AlarmLevel fromApiValue(String? t) {
     switch (t) {
       case 'critical':
@@ -77,7 +103,7 @@ class RuleCondition {
   RuleCondition({
     required this.type,
     List<String>? keywords,
-    this.logic = LogicType.or, // 기본값: OR
+    this.logic = LogicType.or,
     this.id,
     this.position,
   }) : keywords = List.from(keywords ?? []);
@@ -89,31 +115,13 @@ class RuleCondition {
         id = other.id,
         position = other.position;
 
-  /// ✅ copyWith 추가
-  RuleCondition copyWith({
-    ConditionType? type,
-    List<String>? keywords,
-    LogicType? logic,
-    int? id,         // id를 명시적으로 바꿔야 하면 전달
-    int? position,   // position을 명시적으로 바꿔야 하면 전달
-  }) {
-    return RuleCondition(
-      type: type ?? this.type,
-      keywords: keywords ?? List<String>.from(this.keywords),
-      logic: logic ?? this.logic,
-      id: id ?? this.id,
-      position: position ?? this.position,
-    );
-  }
-
   factory RuleCondition.fromJson(Map<String, dynamic> json) {
-    final kw = (json['keywords'] as List?)?.cast<String>() ?? const <String>[];
     return RuleCondition(
       id: json['id'],
       position: json['position'],
       type: ConditionTypeExt.fromApiValue(json['type'] ?? ''),
       logic: LogicTypeExt.fromApiValue(json['logic'] ?? 'or'),
-      keywords: kw,
+      keywords: (json['keywords'] as List<dynamic>).cast<String>(),
     );
   }
 
@@ -133,13 +141,8 @@ class MailRule {
   List<RuleCondition> conditions;
   bool enabled;
   AlarmLevel alarm;
-
-  /// ✅ 추가: 알람 사운드 식별자/경로 (예: 'default' 또는 'assets/sounds/siren.mp3')
-  String sound;
-
-  /// ✅ 추가: TTS 메시지(사용자 입력). null 가능
+  String? sound;
   String? tts;
-
   int? id;
 
   MailRule({
@@ -147,8 +150,8 @@ class MailRule {
     required this.conditions,
     this.enabled = true,
     this.alarm = AlarmLevel.normal,
-    this.sound = 'default',
-    this.tts,                 // ✅ 새 필드
+    this.sound,
+    this.tts,
     this.id,
   });
 
@@ -158,10 +161,9 @@ class MailRule {
         enabled = other.enabled,
         alarm = other.alarm,
         sound = other.sound,
-        tts = other.tts,      // ✅ 복제
+        tts = other.tts,
         id = other.id;
 
-  /// ✅ copyWith에 sound/tts 파라미터를 추가
   MailRule copyWith({
     String? name,
     List<RuleCondition>? conditions,
@@ -173,16 +175,15 @@ class MailRule {
   }) {
     return MailRule(
       name: name ?? this.name,
-      // 방어적 복사: 외부에서 전달 안하면 기존 리스트를 깊은 복사로 복제
-      conditions: conditions ??
-          this.conditions.map((c) => RuleCondition.clone(c)).toList(),
+      conditions: conditions ?? this.conditions.map((c) => RuleCondition.clone(c)).toList(),
       enabled: enabled ?? this.enabled,
       alarm: alarm ?? this.alarm,
-      sound: sound ?? this.sound,     // ✅ sound 반영
-      tts: tts ?? this.tts,           // ✅ tts 반영
+      sound: sound ?? this.sound,
+      tts: tts ?? this.tts,
       id: id ?? this.id,
     );
   }
+
 
   factory MailRule.fromJson(Map<String, dynamic> json) {
     return MailRule(
@@ -190,12 +191,8 @@ class MailRule {
       name: json['name'],
       enabled: json['enabled'] ?? true,
       alarm: AlarmLevelExt.fromApiValue(json['alarm'] as String?),
-      sound: (json['sound'] as String?)?.trim().isNotEmpty == true
-          ? json['sound']
-          : 'default',
-      tts: (json['tts'] as String?)?.trim().isNotEmpty == true
-          ? json['tts']
-          : null,                         // ✅ tts 수신
+      sound: json['sound'],
+      tts: json['tts'],
       conditions: (json['conditions'] as List<dynamic>)
           .map((c) => RuleCondition.fromJson(c))
           .toList(),
@@ -208,8 +205,8 @@ class MailRule {
       'name': name,
       'enabled': enabled,
       'alarm': alarm.apiValue,
-      'sound': sound,                              // ✅ 직렬화
-      if (tts != null) 'tts': tts,                 // ✅ 직렬화 (null이면 제외)
+      if (sound != null) 'sound': sound,
+      if (tts != null) 'tts': tts,
       'conditions': conditions.map((c) => c.toJson()).toList(),
     };
   }

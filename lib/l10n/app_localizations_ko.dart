@@ -30,7 +30,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get alarmSettingsTitle => '알람 설정';
 
   @override
-  String get generalAlarmLabel => '일반 알람';
+  String get generalAlarmLabel => '알람';
 
   @override
   String get generalAlarmSubtitle => '무음/방해금지 모드를 우회하지 않음';
@@ -224,7 +224,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get ttsMessageLabel => 'TTS 메시지';
 
   @override
-  String get ttsMessageHint => '예: 긴급 메일이 도착했습니다.';
+  String get ttsMessageHint => '예: 긴급 메일이 도착했습니다';
 
   @override
   String get loginTitle => '로그인';
@@ -258,4 +258,22 @@ class AppLocalizationsKo extends AppLocalizations {
   String loginError(String error) {
     return '로그인 오류: $error';
   }
+
+  @override
+  String get alarmSoundLabel => '사운드';
+
+  @override
+  String get previewSound => '미리 듣기';
+
+  @override
+  String get oneTimeAlarm => '1회 울림';
+
+  @override
+  String get untilStoppedAlarm => '정지 시까지';
+
+  @override
+  String get alarmTitleOneTime => '1회 울림';
+
+  @override
+  String get alarmTitleUntil => '정지 시까지';
 }

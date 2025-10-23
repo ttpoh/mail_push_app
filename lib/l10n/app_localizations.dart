@@ -142,7 +142,7 @@ abstract class AppLocalizations {
   /// No description provided for @generalAlarmLabel.
   ///
   /// In en, this message translates to:
-  /// **'General alerts'**
+  /// **'alerts'**
   String get generalAlarmLabel;
 
   /// No description provided for @generalAlarmSubtitle.
@@ -490,7 +490,7 @@ abstract class AppLocalizations {
   /// No description provided for @selectSoundHint.
   ///
   /// In en, this message translates to:
-  /// **'Please select the sound.'**
+  /// **'Select a sound'**
   String get selectSoundHint;
 
   /// No description provided for @ttsMessageLabel.
@@ -502,7 +502,7 @@ abstract class AppLocalizations {
   /// No description provided for @ttsMessageHint.
   ///
   /// In en, this message translates to:
-  /// **'Example: Emergency mail has arrived.'**
+  /// **'Ex: Emergency mail has arrived.'**
   String get ttsMessageHint;
 
   /// No description provided for @loginTitle.
@@ -558,6 +558,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Login error: {error}'**
   String loginError(String error);
+
+  /// No description provided for @alarmSoundLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Sound'**
+  String get alarmSoundLabel;
+
+  /// No description provided for @previewSound.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get previewSound;
+
+  /// No description provided for @oneTimeAlarm.
+  ///
+  /// In en, this message translates to:
+  /// **'Ring once'**
+  String get oneTimeAlarm;
+
+  /// No description provided for @untilStoppedAlarm.
+  ///
+  /// In en, this message translates to:
+  /// **'Ring until stopped'**
+  String get untilStoppedAlarm;
+
+  /// No description provided for @alarmTitleOneTime.
+  ///
+  /// In en, this message translates to:
+  /// **'Ring Once'**
+  String get alarmTitleOneTime;
+
+  /// No description provided for @alarmTitleUntil.
+  ///
+  /// In en, this message translates to:
+  /// **'Until Stopped'**
+  String get alarmTitleUntil;
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {

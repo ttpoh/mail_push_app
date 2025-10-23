@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:mail_push_app/models/rule_model.dart' as rm;
 import 'package:mail_push_app/ui_kit/constant/event_color.dart' as ec;
+import 'package:mail_push_app/l10n/app_localizations.dart';
 
 class ConditionCard extends StatefulWidget {
   const ConditionCard({
@@ -41,6 +42,7 @@ class _ConditionCardState extends State<ConditionCard> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context)!; // ✅ 다국어 사용
     final cond = widget.condition;
 
     return Container(
@@ -76,9 +78,9 @@ class _ConditionCardState extends State<ConditionCard> {
                     },
                     items: rm.ConditionType.values.map((ctype) {
                       final label = switch (ctype) {
-                        rm.ConditionType.subjectContains => '제목에 포함',
-                        rm.ConditionType.bodyContains    => '내용에 포함',
-                        rm.ConditionType.fromSender      => '보낸 사람',
+                        rm.ConditionType.subjectContains => t.conditionTypeSubjectContains,
+                        rm.ConditionType.bodyContains    => t.conditionTypeBodyContains,
+                        rm.ConditionType.fromSender      => t.conditionTypeFromSender,
                       };
                       return DropdownMenuItem(value: ctype, child: Text(label));
                     }).toList(),
@@ -90,7 +92,7 @@ class _ConditionCardState extends State<ConditionCard> {
                 onPressed: widget.onRemove,
                 icon: const Icon(Icons.close),
                 color: ec.eventLightUnselectedItemColor,
-                tooltip: '조건 삭제',
+                tooltip: t.deleteCondition, // ✅ '조건 삭제'
               ),
             ],
           ),
@@ -100,9 +102,9 @@ class _ConditionCardState extends State<ConditionCard> {
           if (!_hideLogic)
             Row(
               children: [
-                const Text(
-                  '키워드 로직',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+                Text(
+                  t.keywordLogicLabel, // ✅ "키워드 로직"
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -117,8 +119,8 @@ class _ConditionCardState extends State<ConditionCard> {
                       },
                       items: rm.LogicType.values.map((ltype) {
                         final label = switch (ltype) {
-                          rm.LogicType.and => '모두 포함(AND)',
-                          rm.LogicType.or  => '하나 이상 포함(OR)',
+                          rm.LogicType.and => t.logicAnd,
+                          rm.LogicType.or  => t.logicOr,
                         };
                         return DropdownMenuItem(value: ltype, child: Text(label));
                       }).toList(),
@@ -129,15 +131,15 @@ class _ConditionCardState extends State<ConditionCard> {
             ),
           if (!_hideLogic) const SizedBox(height: 10),
 
-          // 키워드 입력 + 추가 (새 위젯 안 띄우고 현재 조건에 바로 추가)
+          // 키워드 입력 + 추가
           Row(
             children: [
               Expanded(
                 child: TextField(
                   controller: _kwCtrl,
                   decoration: InputDecoration(
-                    hintText: '키워드를 입력 후 Enter',
-                    labelText: '키워드 추가',
+                    hintText: t.keywordHint, // ✅ "예: MTG"
+                    labelText: t.keywordAddLabel, // ✅ "키워드 추가"
                     isDense: true,
                     border: OutlineInputBorder(
                       borderSide: BorderSide(color: ec.eventLightBorderColor),
@@ -165,7 +167,7 @@ class _ConditionCardState extends State<ConditionCard> {
                   foregroundColor: Colors.white,
                   elevation: 0,
                 ),
-                child: const Text('추가'),
+                child: Text(t.add), // ✅ "추가"
               ),
             ],
           ),
@@ -189,11 +191,12 @@ class _ConditionCardState extends State<ConditionCard> {
             }),
           ),
 
+          // 키워드 없을 때
           if (cond.keywords.isEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                '키워드를 1개 이상 추가하세요.',
+                t.addAtLeastOneKeyword, // ✅ "키워드를 1개 이상 추가하세요."
                 style: TextStyle(color: Colors.red.shade700, fontSize: 12),
               ),
             ),

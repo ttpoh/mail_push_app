@@ -252,7 +252,7 @@ class _RuleListPageState extends State<RuleListPage> {
     final rule = _rules[idx];
     final subtitle = rule.conditions
         .map((c) =>
-            '${c.type.displayName}: ${c.keywords.isEmpty ? '(${t.none})' : c.keywords.join(", ")}')
+            '${c.type.displayName(context)}: ${c.keywords.isEmpty ? '(${t.none})' : c.keywords.join(", ")}')
         .join(' • ');
 
     final isBusy = _busyEnabledIndex == idx;

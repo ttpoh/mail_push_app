@@ -30,7 +30,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get alarmSettingsTitle => 'Notification settings';
 
   @override
-  String get generalAlarmLabel => 'General alerts';
+  String get generalAlarmLabel => 'alerts';
 
   @override
   String get generalAlarmSubtitle => 'Does not bypass Silent/Do Not Disturb';
@@ -218,13 +218,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get soundLabel => 'sound';
 
   @override
-  String get selectSoundHint => 'Please select the sound.';
+  String get selectSoundHint => 'Select a sound';
 
   @override
   String get ttsMessageLabel => 'TTS message';
 
   @override
-  String get ttsMessageHint => 'Example: Emergency mail has arrived.';
+  String get ttsMessageHint => 'Ex: Emergency mail has arrived.';
 
   @override
   String get loginTitle => 'Login';
@@ -258,4 +258,22 @@ class AppLocalizationsEn extends AppLocalizations {
   String loginError(String error) {
     return 'Login error: $error';
   }
+
+  @override
+  String get alarmSoundLabel => 'Sound';
+
+  @override
+  String get previewSound => 'Preview';
+
+  @override
+  String get oneTimeAlarm => 'Ring once';
+
+  @override
+  String get untilStoppedAlarm => 'Ring until stopped';
+
+  @override
+  String get alarmTitleOneTime => 'Ring Once';
+
+  @override
+  String get alarmTitleUntil => 'Until Stopped';
 }

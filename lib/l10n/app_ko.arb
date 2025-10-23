@@ -7,7 +7,7 @@
   "waitingNewEmails": "새 이메일 수신 대기 중...",
   "settingsOpenError": "설정 화면을 열 수 없습니다.",
   "alarmSettingsTitle": "알람 설정",
-  "generalAlarmLabel": "일반 알람",
+  "generalAlarmLabel": "알람",
   "generalAlarmSubtitle": "무음/방해금지 모드를 우회하지 않음",
   "criticalAlarmLabel": "긴급 알람 (무음 모드 허용)",
   "criticalAlarmSubtitle": "필요 시 방해금지 모드도 우회",
@@ -95,5 +95,18 @@
   "loginFailed": "{service} 로그인 실패",
   "@loginFailed": { "placeholders": { "service": { "type": "String" } } },
   "loginError": "로그인 오류: {error}",
-  "@loginError": { "placeholders": { "error": { "type": "String" } } }
+  "@loginError": { "placeholders": { "error": { "type": "String" } } },
+
+  "alarmSoundLabel": "사운드",
+  "previewSound": "미리 듣기",
+  "ttsMessageLabel": "TTS 메시지",
+  "ttsMessageHint": "예: 긴급 메일이 도착했습니다",
+  "oneTimeAlarm": "1회 울림",
+  "untilStoppedAlarm": "정지 시까지",
+  "addCondition": "조건 추가",
+  "selectSoundHint": "사운드를 선택하세요",
+  "alarmTitleOneTime": "1회 울림",
+  "alarmTitleUntil": "정지 시까지"
+
+
 }

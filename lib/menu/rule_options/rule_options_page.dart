@@ -4,7 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mail_push_app/api/rule_list_client.dart';
 import 'package:mail_push_app/models/rule_model.dart' as rm;
 import 'package:mail_push_app/ui_kit/constant/event_color.dart' as ec;
-
+import 'package:mail_push_app/l10n/app_localizations.dart';
 import 'models/alarm_config.dart';
 import 'widgets/new_condition_composer.dart';
 import 'widgets/condition_card.dart';
@@ -26,8 +26,6 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
   bool _saving = false;
 
   rm.AlarmLevel _alarm = rm.AlarmLevel.normal;
-
-  // 알람 상세 설정(사운드/tts). normal은 설정 불필요.
   final Map<rm.AlarmLevel, AlarmConfig> _alarmConfigs = {
     rm.AlarmLevel.critical: AlarmConfig(sound: 'default'),
     rm.AlarmLevel.until:   AlarmConfig(sound: 'default'),
@@ -44,11 +42,10 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
       _conditions = clone.conditions;
       _alarm = clone.alarm;
 
-      // 서버에서 sound/tts를 내려주고 모델이 보유한다면 초기화
       if (clone.sound != null || clone.tts != null) {
         final cfgLevel = (clone.alarm == rm.AlarmLevel.critical || clone.alarm == rm.AlarmLevel.until)
             ? clone.alarm
-            : rm.AlarmLevel.critical; // 안전 기본값
+            : rm.AlarmLevel.critical;
         _alarmConfigs[cfgLevel] = AlarmConfig(
           sound: clone.sound,
           tts: clone.tts,
@@ -79,42 +76,41 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
         rule.id = newId;
       }
       return true;
-    } catch (e) {
-      debugPrint("Rule save error: $e");
+    } catch (_) {
       return false;
     }
   }
 
   void _saveRule() async {
+    final t = AppLocalizations.of(context)!;
     final name = _nameController.text.trim();
 
     if (name.isEmpty) {
-      setState(() => _nameError = '규칙 이름을 입력하세요.');
+      setState(() => _nameError = t.ruleNameRequired);
       return;
     }
     if (_conditions.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('조건을 최소 1개 이상 추가하세요.')),
+        SnackBar(content: Text(t.needAtLeastOneCondition)),
       );
       return;
     }
     for (var cond in _conditions) {
       if (cond.keywords.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('모든 조건에 키워드를 1개 이상 입력하세요.')),
+          SnackBar(content: Text(t.needKeywordsInAllConditions)),
         );
         return;
       }
     }
 
-    // critical / until 은 최소 하나의 사운드 또는 TTS가 필요
     String? sound;
     String? tts;
     if (_alarm == rm.AlarmLevel.critical || _alarm == rm.AlarmLevel.until) {
       final cfg = _alarmConfigs[_alarm];
       if (cfg == null || cfg.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('사운드 또는 TTS를 설정하세요.')),
+          SnackBar(content: Text(t.enterSoundOrTts)),
         );
         return;
       }
@@ -122,22 +118,20 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
       tts   = cfg.tts?.trim().isEmpty   == true ? null : cfg.tts?.trim();
     }
 
-    // position 정렬 보장
     for (int i = 0; i < _conditions.length; i++) {
       _conditions[i].position = i;
     }
 
     setState(() => _saving = true);
 
-    // 모델에 sound/tts 필드가 있다고 가정 (없다면 rm.MailRule에 필드 추가 필요)
     final rm.MailRule result = rm.MailRule(
       name: name,
       conditions: _conditions,
       enabled: true,
       alarm: _alarm,
       id: widget.initialRule?.id,
-      sound: sound ?? '', // ✅ 알람 상세 설정 반영
-      tts: tts,           // ✅ 알람 상세 설정 반영
+      sound: sound ?? '',
+      tts: tts,
     );
 
     final success = await _sendRuleToServer(result);
@@ -145,9 +139,8 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
     setState(() => _saving = false);
 
     if (!success) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('저장에 실패했습니다.')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(t.ruleSaveFailed)));
       return;
     }
 
@@ -156,10 +149,12 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context)!;
+
     return Scaffold(
       backgroundColor: ec.eventLightBackgroundColor,
       appBar: AppBar(
-        title: Text(_isEditing ? '규칙 수정' : '규칙 만들기'),
+        title: Text(_isEditing ? t.ruleEditTitle : t.ruleCreateTitle),
         backgroundColor: ec.eventLightCardColor,
         elevation: 0,
         foregroundColor: Colors.black,
@@ -167,7 +162,7 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
           TextButton(
             onPressed: _saving ? null : _saveRule,
             child: Text(
-              _saving ? '저장 중...' : '저장',
+              _saving ? t.savingEllipsis : t.save,
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
@@ -175,7 +170,7 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
       ),
       body: Center(
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(16),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
             child: Container(
@@ -197,11 +192,10 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // 이름
                       TextField(
                         controller: _nameController,
                         decoration: InputDecoration(
-                          labelText: '규칙 이름',
+                          labelText: t.ruleNameLabel,
                           border: OutlineInputBorder(
                             borderSide: BorderSide(color: ec.eventLightBorderColor),
                             borderRadius: BorderRadius.circular(8),
@@ -220,10 +214,9 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
                       ),
                       const SizedBox(height: 16),
 
-                      const Text('조건', style: TextStyle(fontWeight: FontWeight.w700)),
+                      Text(t.conditions, style: const TextStyle(fontWeight: FontWeight.w700)),
                       const SizedBox(height: 8),
 
-                      // ✅ 생성/수정 모두에서 조건 추가 가능
                       NewConditionComposer(
                         onCreate: (cond) {
                           setState(() {
@@ -234,7 +227,6 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
                       ),
                       const SizedBox(height: 8),
 
-                      // 기존 조건 리스트
                       ...List.generate(_conditions.length, (i) {
                         return ConditionCard(
                           condition: _conditions[i],
@@ -245,117 +237,21 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
 
                       const SizedBox(height: 12),
 
-                      // 알람 선택 + 상세 설정(사운드/tts) 다이얼로그
                       AlarmSelector(
                         selected: _alarm,
                         configs: _alarmConfigs,
                         onSelected: (lvl) => setState(() => _alarm = lvl),
                         onConfigSaved: (lvl, cfg) => setState(() => _alarmConfigs[lvl] = cfg),
-
-                        showInlineSummary: false, // ✅ 요약 감추기
-
+                        showInlineSummary: false,
                       ),
-                      const SizedBox(height: 8),
-
-                      // ====================================================
-                      // ✅ "알람 옵션 바로 아래" 3열×2행 요약 (아이콘 유지 + 세로 정렬)
-                      // ====================================================
-                      // Builder(
-                      //   builder: (context) {
-                      //     final criticalCfg = _alarmConfigs[rm.AlarmLevel.critical];
-                      //     final untilCfg    = _alarmConfigs[rm.AlarmLevel.until];
-
-                      //     String disp(String? v) =>
-                      //         (v == null || v.trim().isEmpty) ? '—' : v.trim();
-
-                      //     Widget cell({required IconData icon, required String text}) {
-                      //       return Row(
-                      //         crossAxisAlignment: CrossAxisAlignment.center,
-                      //         children: [
-                      //           Icon(icon, size: 14, color: Colors.black54),
-                      //           const SizedBox(width: 6),
-                      //           Expanded(
-                      //             child: Text(
-                      //               text,
-                      //               maxLines: 1,
-                      //               overflow: TextOverflow.ellipsis,
-                      //               style: Theme.of(context).textTheme.labelSmall,
-                      //             ),
-                      //           ),
-                      //         ],
-                      //       );
-                      //     }
-
-                      //     return Row(
-                      //       crossAxisAlignment: CrossAxisAlignment.start,
-                      //       children: [
-                      //         // Normal
-                      //         Expanded(
-                      //           child: Padding(
-                      //             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                      //             child: Column(
-                      //               crossAxisAlignment: CrossAxisAlignment.start,
-                      //               children: [
-                      //                 cell(icon: Icons.music_note, text: '—'),
-                      //                 const SizedBox(height: 6),
-                      //                 cell(icon: Icons.person,     text: '—'),
-                      //               ],
-                      //             ),
-                      //           ),
-                      //         ),
-                      //         // Critical
-                      //         Expanded(
-                      //           child: Padding(
-                      //             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                      //             child: Column(
-                      //               crossAxisAlignment: CrossAxisAlignment.start,
-                      //               children: [
-                      //                 cell(
-                      //                   icon: Icons.music_note,
-                      //                   text: 'sound: ${disp(criticalCfg?.sound)}',
-                      //                 ),
-                      //                 const SizedBox(height: 6),
-                      //                 cell(
-                      //                   icon: Icons.person,
-                      //                   text: 'tts: ${disp(criticalCfg?.tts)}',
-                      //                 ),
-                      //               ],
-                      //             ),
-                      //           ),
-                      //         ),
-                      //         // Until
-                      //         Expanded(
-                      //           child: Padding(
-                      //             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-                      //             child: Column(
-                      //               crossAxisAlignment: CrossAxisAlignment.start,
-                      //               children: [
-                      //                 cell(
-                      //                   icon: Icons.music_note,
-                      //                   text: 'sound: ${disp(untilCfg?.sound)}',
-                      //                 ),
-                      //                 const SizedBox(height: 6),
-                      //                 cell(
-                      //                   icon: Icons.person,
-                      //                   text: 'tts: ${disp(untilCfg?.tts)}',
-                      //                 ),
-                      //               ],
-                      //             ),
-                      //           ),
-                      //         ),
-                      //       ],
-                      //     );
-                      //   },
-                      // ),
 
                       const SizedBox(height: 20),
-
                       Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           TextButton(
                             onPressed: _saving ? null : () => Navigator.of(context).pop(),
-                            child: const Text('취소'),
+                            child: Text(t.cancel),
                           ),
                           const SizedBox(width: 12),
                           ElevatedButton(
@@ -367,7 +263,7 @@ class _RuleOptionsPageState extends State<RuleOptionsPage> {
                             ),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                              child: Text(_saving ? '저장 중...' : '저장'),
+                              child: Text(_saving ? t.savingEllipsis : t.save),
                             ),
                           ),
                         ],
